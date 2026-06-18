@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Elasticsearch で Qiita の技術記事を検索するアプリ">
+    <title>Qiita Article Search</title>
+    <link rel="stylesheet" href="/static/style.css?v=20260618-2">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" data-route>
+          <span class="brand-mark">Q</span>
+          <span>
+            <strong>Qiita Article Search</strong>
+            <small>Powered by Elasticsearch</small>
+          </span>
+        </a>
+        <nav class="header-nav">
+          <label class="backend-selector">
+            <span>Backend</span>
+            <select id="backend-select" aria-label="利用するバックエンド">
+              <option value="python">Python :5020</option>
+              <option value="elixir">Elixir :5021</option>
+            </select>
+          </label>
+          <a class="all-articles-link" href="/all" data-route>全記事一覧</a>
+          <a class="api-link" id="api-link" href="#" target="_blank" rel="noopener noreferrer">JSON API</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="app" class="container" aria-live="polite">
+      <div class="loading-state">読み込み中…</div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">Qiita articles × Elasticsearch</div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <script type="module" src="/static/app.js?v=20260618-3"></script>
+  </body>
+</html>

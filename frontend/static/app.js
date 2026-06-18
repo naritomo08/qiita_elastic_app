@@ -1,0 +1,472 @@
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+const BACKENDS = {
+  python: { label: "Python", port: 5020 },
+  elixir: { label: "Elixir", port: 5021 },
+};
+let selectedBackend = localStorage.getItem("qiita-search-backend");
+if (!BACKENDS[selectedBackend]) selectedBackend = "python";
+
+const app = document.querySelector("#app");
+const apiLink = document.querySelector("#api-link");
+const backendSelect = document.querySelector("#backend-select");
+backendSelect.value = selectedBackend;
+
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: "strict",
+  theme: "neutral",
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
+  flowchart: { htmlLabels: false, useMaxWidth: true },
+});
+
+marked.setOptions({ gfm: true, breaks: true });
+
+window.addEventListener("popstate", renderRoute);
+backendSelect.addEventListener("change", async () => {
+  selectedBackend = backendSelect.value;
+  localStorage.setItem("qiita-search-backend", selectedBackend);
+  app.innerHTML = `<div class="loading-state">${BACKENDS[selectedBackend].label}バックエンドへ切り替え中…</div>`;
+  await renderRoute();
+});
+
+document.addEventListener("click", async (event) => {
+  const link = event.target.closest("a[data-route]");
+  if (!link || link.origin !== location.origin) return;
+  event.preventDefault();
+
+  if (
+    location.pathname === "/" &&
+    link.pathname === "/" &&
+    (link.dataset.tag !== undefined || link.dataset.clearTag !== undefined)
+  ) {
+    const tag = link.dataset.tag || "";
+    history.pushState({}, "", tag ? `/?tag=${encodeURIComponent(tag)}` : "/");
+    await updateHomeArticles(tag);
+    return;
+  }
+
+  history.pushState({}, "", link.href);
+  renderRoute();
+});
+
+document.addEventListener("submit", (event) => {
+  if (!event.target.matches("[data-search-form]")) return;
+  event.preventDefault();
+  const query = new FormData(event.target).get("q")?.trim();
+  if (!query) return;
+  history.pushState({}, "", `/search?q=${encodeURIComponent(query)}`);
+  renderRoute();
+});
+
+renderRoute();
+
+async function renderRoute() {
+  window.scrollTo({ top: 0 });
+  const path = location.pathname;
+  try {
+    if (path.startsWith("/articles/")) {
+      await renderDetail(decodeURIComponent(path.slice("/articles/".length)));
+    } else if (path === "/all") {
+      await renderAllArticles();
+    } else if (path === "/search") {
+      await renderSearch();
+    } else {
+      await renderHome();
+    }
+  } catch (error) {
+    renderError(error.message || "画面を表示できませんでした。");
+  }
+}
+
+async function renderAllArticles() {
+  const params = new URLSearchParams(location.search);
+  const page = positiveInt(params.get("page"), 1);
+  const size = Math.min(positiveInt(params.get("size"), 20), 100);
+  const data = await api("/api/articles", { page, size });
+  const totalPages = Math.max(1, Math.ceil(data.total / size));
+  document.title = "全記事一覧 | Qiita Article Search";
+  apiLink.href = `${apiBase()}/api/articles?${new URLSearchParams({ page, size })}`;
+
+  app.innerHTML = `
+    <section class="all-articles-header">
+      <p class="eyebrow">ALL ARTICLES</p>
+      <div class="results-summary">
+        <div>
+          <h1>全記事一覧</h1>
+          <p class="all-articles-copy">Elasticsearchに登録されている記事を更新日順で表示しています。</p>
+        </div>
+        <strong>${Number(data.total).toLocaleString()}<small> 件</small></strong>
+      </div>
+    </section>
+    <section class="section">
+      ${data.results.length ? `
+        <div class="article-grid">${data.results.map(articleCard).join("")}</div>
+        ${allArticlesPagination(page, size, totalPages)}
+      ` : emptyState("記事はまだありません", "Elasticsearchインデックスに記事を投入すると、ここに表示されます。")}
+    </section>
+  `;
+}
+
+async function renderHome() {
+  const params = new URLSearchParams(location.search);
+  const tag = params.get("tag")?.trim() || "";
+  const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
+  document.title = "Qiita Article Search";
+  apiLink.href = `${apiBase()}/api/search?q=Elasticsearch`;
+
+  app.innerHTML = `
+    <section class="hero">
+      <p class="eyebrow">TECH ARTICLE DISCOVERY</p>
+      <h1>知りたい技術を、<br>すばやく見つける。</h1>
+      <p class="hero-copy">Elasticsearch に登録された Qiita 記事を、タイトル・本文・タグから横断検索できます。</p>
+      ${searchForm("")}
+    </section>
+    ${homeArticleSection(data.results, tag)}
+  `;
+}
+
+async function updateHomeArticles(tag) {
+  const section = document.querySelector("#home-articles");
+  if (!section) {
+    await renderHome();
+    return;
+  }
+
+  section.classList.add("is-updating");
+  section.setAttribute("aria-busy", "true");
+  try {
+    const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
+    section.outerHTML = homeArticleSection(data.results, tag);
+  } catch (error) {
+    section.classList.remove("is-updating");
+    section.removeAttribute("aria-busy");
+    showNotice(error.message || "記事を取得できませんでした。");
+  }
+}
+
+function homeArticleSection(articles, tag) {
+  return `
+    <section class="section" id="home-articles">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">${tag ? "TAG FILTER" : "RECENTLY UPDATED"}</p>
+          <h2>${tag ? `「${escapeHtml(tag)}」の記事` : "最近更新された記事"}</h2>
+        </div>
+        <span class="article-count">${articles.length} articles</span>
+      </div>
+      ${tag ? `
+        <div class="active-filter">
+          <span>タグで絞り込み中</span>
+          <strong>${escapeHtml(tag)}</strong>
+          <a href="/" data-route data-clear-tag>絞り込みを解除 ×</a>
+        </div>` : ""}
+      ${articleGrid(articles, tag)}
+    </section>
+  `;
+}
+
+async function renderSearch() {
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q")?.trim() || "";
+  const page = positiveInt(params.get("page"), 1);
+  const size = Math.min(positiveInt(params.get("size"), 10), 100);
+  if (!q) {
+    history.replaceState({}, "", "/");
+    await renderHome();
+    showNotice("検索キーワードを入力してください。");
+    return;
+  }
+
+  const data = await api("/api/search", { q, page, size });
+  const totalPages = Math.max(1, Math.ceil(data.total / size));
+  document.title = `「${q}」の検索結果 | Qiita Article Search`;
+  apiLink.href = `${apiBase()}/api/search?${new URLSearchParams({ q, page, size })}`;
+
+  app.innerHTML = `
+    <section class="search-header">${searchForm(q, size)}</section>
+    <section class="section search-results">
+      <div class="results-summary">
+        <div>
+          <p class="eyebrow">SEARCH RESULTS</p>
+          <h1>「${escapeHtml(q)}」の検索結果</h1>
+        </div>
+        <strong>${Number(data.total).toLocaleString()}<small> 件</small></strong>
+      </div>
+      ${data.results.length ? `
+        <div class="result-list">${data.results.map(resultCard).join("")}</div>
+        ${pagination(q, page, size, totalPages)}
+      ` : emptyState("一致する記事がありませんでした", "キーワードを短くするか、別の表記で検索してみてください。")}
+    </section>
+  `;
+}
+
+async function renderDetail(articleId) {
+  const article = await api(`/api/articles/${encodeURIComponent(articleId)}`);
+  document.title = `${article.title || "無題の記事"} | Qiita Article Search`;
+  apiLink.href = `${apiBase()}/api/articles/${encodeURIComponent(articleId)}`;
+
+  const source = removeDangerousBlocks(article.body || "本文がありません。");
+  const markdownHtml = DOMPurify.sanitize(marked.parse(source), {
+    USE_PROFILES: { html: true },
+    ADD_ATTR: ["target", "rel", "class"],
+  });
+
+  app.innerHTML = `
+    <article class="article-detail">
+      <a class="back-link" href="/" data-route>← 記事一覧へ戻る</a>
+      <header class="detail-header">
+        <p class="eyebrow">QIITA ARTICLE</p>
+        <h1>${escapeHtml(article.title || "無題の記事")}</h1>
+        ${tags(article.tags, true)}
+        <dl class="article-dates">
+          <div><dt>作成</dt><dd>${formatDate(article.created_at)}</dd></div>
+          <div><dt>更新</dt><dd>${formatDate(article.updated_at)}</dd></div>
+        </dl>
+        ${article.url ? `<a class="original-link" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
+      </header>
+      <div class="article-body markdown-body">${markdownHtml}</div>
+    </article>
+  `;
+
+  secureArticleLinks();
+  await Promise.all([renderMermaid(), renderLinkPreviews()]);
+}
+
+function articleGrid(articles, selectedTag) {
+  if (!articles.length) {
+    return selectedTag
+      ? emptyState(`「${escapeHtml(selectedTag)}」の記事は見つかりませんでした`, '<a href="/" data-route>絞り込みを解除して記事一覧へ戻る</a>')
+      : emptyState("記事はまだありません", "Elasticsearch インデックスに記事を投入すると、ここに表示されます。");
+  }
+  return `<div class="article-grid">${articles.map(articleCard).join("")}</div>`;
+}
+
+function articleCard(article) {
+  return `
+    <article class="article-card">
+      <div class="card-meta"><time>更新 ${formatDate(article.updated_at)}</time></div>
+      <h3><a href="/articles/${encodeURIComponent(article.id)}" data-route>${escapeHtml(article.title || "無題の記事")}</a></h3>
+      ${tags(article.tags)}
+      <p class="excerpt">${escapeHtml(stripMarkdown(article.body || "").slice(0, 180))}${(article.body || "").length > 180 ? "…" : ""}</p>
+      <div class="card-actions">
+        <a class="card-link" href="/articles/${encodeURIComponent(article.id)}" data-route>記事を読む <span>→</span></a>
+        ${article.url ? `<a class="card-link external" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function resultCard(article) {
+  const highlightedTitle = sanitizeHighlight(article.highlight?.title?.[0]) || escapeHtml(article.title || "無題の記事");
+  const fragments = article.highlight?.body?.length
+    ? article.highlight.body.map((item) => `<p>${sanitizeHighlight(item)}…</p>`).join("")
+    : `<p>${escapeHtml(stripMarkdown(article.body || "").slice(0, 240))}</p>`;
+  return `
+    <article class="result-card">
+      <div class="card-meta">
+        <time>更新 ${formatDate(article.updated_at)}</time>
+        ${article._score != null ? `<span>score ${Number(article._score).toFixed(2)}</span>` : ""}
+      </div>
+      <h2><a href="/articles/${encodeURIComponent(article.id)}" data-route>${highlightedTitle}</a></h2>
+      ${tags(article.tags)}
+      <div class="highlights">${fragments}</div>
+      <div class="card-actions">
+        <a class="card-link" href="/articles/${encodeURIComponent(article.id)}" data-route>詳細を見る <span>→</span></a>
+        ${article.url ? `<a class="card-link external" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function tags(values, large = false) {
+  if (!Array.isArray(values) || !values.length) return "";
+  return `<div class="tags${large ? " large" : ""}">${values.map((tag) =>
+    `<a class="tag" href="/?tag=${encodeURIComponent(tag)}" data-route data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</a>`
+  ).join("")}</div>`;
+}
+
+function searchForm(value, size = 10) {
+  return `
+    <form class="search-form${value ? " compact" : ""}" data-search-form>
+      <label class="sr-only" for="q">検索キーワード</label>
+      <div class="search-box">
+        <span class="search-icon" aria-hidden="true"></span>
+        <input id="q" name="q" type="search" value="${escapeHtml(value)}" placeholder="例: Elasticsearch, Python, Docker" required>
+        <input type="hidden" name="size" value="${size}">
+        <button type="submit">検索</button>
+      </div>
+    </form>`;
+}
+
+function pagination(q, page, size, totalPages) {
+  if (totalPages <= 1) return "";
+  const link = (target, label) => `<a href="/search?${new URLSearchParams({ q, page: target, size })}" data-route>${label}</a>`;
+  return `
+    <nav class="pagination">
+      ${page > 1 ? link(page - 1, "← 前へ") : '<span class="disabled">← 前へ</span>'}
+      <span>${page} / ${totalPages}</span>
+      ${page < totalPages ? link(page + 1, "次へ →") : '<span class="disabled">次へ →</span>'}
+    </nav>`;
+}
+
+function allArticlesPagination(page, size, totalPages) {
+  if (totalPages <= 1) return "";
+  const link = (target, label) =>
+    `<a href="/all?${new URLSearchParams({ page: target, size })}" data-route>${label}</a>`;
+  return `
+    <nav class="pagination">
+      ${page > 1 ? link(page - 1, "← 前へ") : '<span class="disabled">← 前へ</span>'}
+      <span>${page} / ${totalPages}</span>
+      ${page < totalPages ? link(page + 1, "次へ →") : '<span class="disabled">次へ →</span>'}
+    </nav>`;
+}
+
+async function renderMermaid() {
+  const blocks = [...document.querySelectorAll(".markdown-body pre > code.language-mermaid")];
+  for (const [index, code] of blocks.entries()) {
+    const source = code.textContent;
+    const diagram = document.createElement("div");
+    diagram.className = "mermaid-diagram";
+    diagram.id = `mermaid-diagram-${index}`;
+    diagram.textContent = source;
+    code.parentElement.replaceWith(diagram);
+    try {
+      await mermaid.run({ nodes: [diagram] });
+    } catch {
+      diagram.outerHTML = `<p class="mermaid-error-message">Mermaid図を描画できないため、定義を表示しています。</p><pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
+    }
+  }
+}
+
+async function renderLinkPreviews() {
+  const links = [...document.querySelectorAll(".markdown-body p > a[href]")].filter((link) =>
+    link.parentElement.children.length === 1 &&
+    link.parentElement.textContent.trim() === link.textContent.trim() &&
+    link.href.startsWith("http")
+  );
+  await Promise.all(links.map(async (link) => {
+    const paragraph = link.parentElement;
+    const card = document.createElement("a");
+    card.className = "link-preview-card is-loading";
+    card.href = link.href;
+    card.target = "_blank";
+    card.rel = "noopener noreferrer";
+    card.innerHTML = `<span class="link-preview-content"><strong class="link-preview-title">${escapeHtml(link.textContent)}</strong><small class="link-preview-site">${escapeHtml(new URL(link.href).hostname)}</small></span><span class="link-preview-arrow">↗</span>`;
+    paragraph.replaceWith(card);
+    try {
+      const preview = await api("/api/link-preview", { url: link.href });
+      card.classList.remove("is-loading");
+      card.querySelector(".link-preview-title").textContent = preview.title;
+      card.querySelector(".link-preview-site").textContent = preview.site_name;
+      if (preview.description) {
+        const description = document.createElement("span");
+        description.className = "link-preview-description";
+        description.textContent = preview.description;
+        card.querySelector(".link-preview-content").append(description);
+      }
+      if (preview.image) {
+        const image = document.createElement("img");
+        image.className = "link-preview-image";
+        image.src = preview.image;
+        image.alt = "";
+        image.loading = "lazy";
+        image.referrerPolicy = "no-referrer";
+        card.prepend(image);
+      }
+    } catch {
+      card.classList.remove("is-loading");
+    }
+  }));
+}
+
+function secureArticleLinks() {
+  document.querySelectorAll(".markdown-body a[href]").forEach((link) => {
+    if (link.href.startsWith("http")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+  });
+}
+
+async function api(path, params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== "" && value != null) query.set(key, value);
+  });
+  const response = await fetch(`${apiBase()}${path}${query.size ? `?${query}` : ""}`);
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("バックエンドから想定外のレスポンスが返されました。");
+  }
+  if (!response.ok) throw new Error(payload.error || "バックエンドでエラーが発生しました。");
+  return payload;
+}
+
+function apiBase() {
+  return `${location.protocol}//${location.hostname}:${BACKENDS[selectedBackend].port}`;
+}
+
+function renderError(message) {
+  app.innerHTML = `<section class="error-page"><p class="error-code">APPLICATION ERROR</p><h1>画面を表示できませんでした</h1><p>${escapeHtml(message)}</p><a class="button-secondary" href="/" data-route>トップページへ戻る</a></section>`;
+}
+
+function showNotice(message) {
+  app.insertAdjacentHTML("afterbegin", `<div class="alert alert-warning">${escapeHtml(message)}</div>`);
+}
+
+function emptyState(title, description) {
+  return `<div class="empty-state"><h3>${title}</h3><p>${description}</p></div>`;
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return escapeHtml(value);
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  }).format(date);
+}
+
+function sanitizeHighlight(value) {
+  if (!value) return "";
+  const escaped = escapeHtml(value);
+  return escaped.replaceAll("&lt;mark&gt;", "<mark>").replaceAll("&lt;/mark&gt;", "</mark>");
+}
+
+function removeDangerousBlocks(value) {
+  return value.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+}
+
+function stripMarkdown(value) {
+  return value
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/[#>*_`~|-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function safeUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) ? escapeHtml(url.href) : "#";
+  } catch {
+    return "#";
+  }
+}
+
+function positiveInt(value, fallback) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function escapeHtml(value) {
+  const element = document.createElement("span");
+  element.textContent = String(value ?? "");
+  return element.innerHTML;
+}

@@ -1,0 +1,65 @@
+services:
+  backend_python:
+    build:
+      context: .
+      dockerfile: backend_python/Dockerfile
+    container_name: qiita-search-backend
+    environment:
+      ES_URL: ${ES_URL:-http://elastic1:9200}
+      ES_INDEX: ${ES_INDEX:-qiita-articles}
+      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-5020}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
+    ports:
+      - "5020:5020"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5020/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  backend_elixir:
+    build:
+      context: .
+      dockerfile: backend_elixir/Dockerfile
+    container_name: qiita-search-backend-elixir
+    environment:
+      ES_URL: ${ES_URL:-http://elastic1:9200}
+      ES_INDEX: ${ES_INDEX:-qiita-articles}
+      BACKEND_PORT: 5021
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
+    ports:
+      - "5021:5021"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:5021/health
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: qiita-search-frontend
+    ports:
+      - "8082:8082"
+    depends_on:
+      backend_python:
+        condition: service_healthy
+      backend_elixir:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.env
+.git/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+backend_elixir/_build/
+backend_elixir/deps/
+backend_elixir/.elixir_ls/
+backend_elixir/cover/

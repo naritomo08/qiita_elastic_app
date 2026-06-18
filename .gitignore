@@ -1,0 +1,63 @@
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Elixir
+backend_elixir/_build/
+backend_elixir/deps/
+backend_elixir/.elixir_ls/
+backend_elixir/cover/
+backend_elixir/doc/
+backend_elixir/erl_crash.dump
+
+# Test and coverage output
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Logs and runtime files
+*.log
+*.pid
+*.sock
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Docker local overrides
+docker-compose.override.yml
+compose.override.yml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
