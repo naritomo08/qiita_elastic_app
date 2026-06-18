@@ -30,7 +30,7 @@ defmodule QiitaSearchBackend.Elasticsearch do
            search(%{
              "query" => %{"match_all" => %{}},
              "sort" => [
-               %{"updated_at" => %{"order" => "desc", "unmapped_type" => "date"}}
+               %{"created_at" => %{"order" => "desc", "unmapped_type" => "date"}}
              ],
              "from" => (page - 1) * size,
              "size" => size

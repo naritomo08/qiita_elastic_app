@@ -94,14 +94,14 @@ async function renderAllArticles() {
       <div class="results-summary">
         <div>
           <h1>全記事一覧</h1>
-          <p class="all-articles-copy">Elasticsearchに登録されている記事を更新日順で表示しています。</p>
+          <p class="all-articles-copy">Elasticsearchに登録されている記事を作成日順で表示しています。</p>
         </div>
         <strong>${Number(data.total).toLocaleString()}<small> 件</small></strong>
       </div>
     </section>
     <section class="section">
       ${data.results.length ? `
-        <div class="article-grid">${data.results.map(articleCard).join("")}</div>
+        <div class="article-grid">${data.results.map((article) => articleCard(article, "created")).join("")}</div>
         ${allArticlesPagination(page, size, totalPages)}
       ` : emptyState("記事はまだありません", "Elasticsearchインデックスに記事を投入すると、ここに表示されます。")}
     </section>
@@ -242,10 +242,12 @@ function articleGrid(articles, selectedTag) {
   return `<div class="article-grid">${articles.map(articleCard).join("")}</div>`;
 }
 
-function articleCard(article) {
+function articleCard(article, dateField = "updated") {
+  const dateLabel = dateField === "created" ? "作成" : "更新";
+  const dateValue = dateField === "created" ? article.created_at : article.updated_at;
   return `
     <article class="article-card">
-      <div class="card-meta"><time>更新 ${formatDate(article.updated_at)}</time></div>
+      <div class="card-meta"><time>${dateLabel} ${formatDate(dateValue)}</time></div>
       <h3><a href="/articles/${encodeURIComponent(article.id)}" data-route>${escapeHtml(article.title || "無題の記事")}</a></h3>
       ${tags(article.tags)}
       <p class="excerpt">${escapeHtml(stripMarkdown(article.body || "").slice(0, 180))}${(article.body || "").length > 180 ? "…" : ""}</p>

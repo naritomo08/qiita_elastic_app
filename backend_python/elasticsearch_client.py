@@ -71,7 +71,7 @@ class QiitaArticleRepository:
         response = self._search(
             {
                 "query": {"match_all": {}},
-                "sort": [{"updated_at": {"order": "desc", "unmapped_type": "date"}}],
+                "sort": [{"created_at": {"order": "desc", "unmapped_type": "date"}}],
                 "from": (page - 1) * size,
                 "size": size,
             }
