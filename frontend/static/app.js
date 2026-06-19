@@ -118,6 +118,17 @@ async function renderHealthDashboard() {
       <section class="health-section">
         <div class="health-section-heading">
           <div>
+            <p class="eyebrow">FRONTEND</p>
+            <h2>フロントエンドコンテナ</h2>
+          </div>
+        </div>
+        <div class="health-grid health-grid-elasticsearch">
+          ${containerHealthCard("frontend", "Frontend", "F")}
+        </div>
+      </section>
+      <section class="health-section">
+        <div class="health-section-heading">
+          <div>
             <p class="eyebrow">BACKENDS</p>
             <h2>バックエンドコンテナ</h2>
           </div>
@@ -169,6 +180,25 @@ function healthCard(key, backend) {
       <dl class="health-details">
         <div><dt>ポート</dt><dd>${backend.port}</dd></div>
         <div><dt>応答時間</dt><dd data-health-latency>—</dd></div>
+        <div><dt>CPU</dt><dd data-health-cpu>—</dd></div>
+        <div><dt>メモリ</dt><dd data-health-memory>—</dd></div>
+      </dl>
+    </article>
+  `;
+}
+
+function containerHealthCard(service, label, icon) {
+  return `
+    <article class="health-card is-checking" data-container-health="${service}">
+      <div class="health-card-top">
+        <span class="health-service-icon" aria-hidden="true">${icon}</span>
+        <span class="health-badge">確認中</span>
+      </div>
+      <h3>${escapeHtml(label)}</h3>
+      <p class="health-message">コンテナの稼働状態を確認しています。</p>
+      <dl class="health-details">
+        <div><dt>CPU</dt><dd data-health-cpu>—</dd></div>
+        <div><dt>メモリ</dt><dd data-health-memory>—</dd></div>
       </dl>
     </article>
   `;
@@ -183,12 +213,20 @@ async function updateHealthDashboard() {
   refreshButton?.setAttribute("disabled", "");
 
   try {
-    const results = await Promise.all(
-      Object.keys(BACKENDS).map(async (key) => [key, await checkBackendHealth(key)])
-    );
+    const [results, containerMetrics] = await Promise.all([
+      Promise.all(Object.keys(BACKENDS).map(async (key) => [key, await checkBackendHealth(key)])),
+      checkContainerMetrics(),
+    ]);
     if (requestId !== healthRequestId || location.pathname !== "/health") return;
 
-    results.forEach(([key, result]) => updateBackendHealthCard(key, result));
+    results.forEach(([key, result]) => {
+      updateBackendHealthCard(key, result);
+      updateContainerUsage(
+        document.querySelector(`[data-backend-health="${key}"]`),
+        containerMetrics.get(`backend_${key}`)
+      );
+    });
+    updateFrontendHealthCard(containerMetrics.get("frontend"), containerMetrics.available);
     const healthyKeys = results.filter(([, result]) => result.ok).map(([key]) => key);
     const elasticsearch = await checkElasticsearchHealth(healthyKeys);
     if (requestId !== healthRequestId || location.pathname !== "/health") return;
@@ -201,6 +239,21 @@ async function updateHealthDashboard() {
       refreshButton?.classList.remove("is-refreshing");
       refreshButton?.removeAttribute("disabled");
     }
+  }
+}
+
+async function checkContainerMetrics() {
+  try {
+    const response = await fetchWithTimeout("/api/container-metrics", 8000);
+    const payload = await response.json();
+    if (!response.ok || payload.status !== "ok") throw new Error();
+    const metrics = new Map(payload.containers.map((container) => [container.service, container]));
+    metrics.available = true;
+    return metrics;
+  } catch {
+    const metrics = new Map();
+    metrics.available = false;
+    return metrics;
   }
 }
 
@@ -265,6 +318,38 @@ function updateBackendHealthCard(key, result) {
     ? "フロントエンドから正常に応答しています。"
     : "応答がありません。コンテナまたはポートを確認してください。";
   card.querySelector("[data-health-latency]").textContent = result.ok ? `${result.latency} ms` : "タイムアウト";
+}
+
+function updateFrontendHealthCard(metrics, metricsAvailable) {
+  const card = document.querySelector('[data-container-health="frontend"]');
+  if (!card) return;
+  const isHealthy = Boolean(metrics);
+  setHealthCardState(card, isHealthy);
+  card.querySelector(".health-badge").textContent = isHealthy ? "稼働中" : "取得不可";
+  card.querySelector(".health-message").textContent = isHealthy
+    ? "この画面を配信しているフロントエンドコンテナです。"
+    : metricsAvailable
+      ? "フロントエンドのコンテナ情報が見つかりません。"
+      : "コンテナ統計APIへ接続できません。";
+  updateContainerUsage(card, metrics);
+}
+
+function updateContainerUsage(card, metrics) {
+  if (!card) return;
+  card.querySelector("[data-health-cpu]").textContent = metrics
+    ? `${Number(metrics.cpu_percent).toFixed(2)} %`
+    : "取得不可";
+  card.querySelector("[data-health-memory]").textContent = metrics
+    ? `${formatBytes(metrics.memory_usage_bytes)} / ${formatBytes(metrics.memory_limit_bytes)} (${Number(metrics.memory_percent).toFixed(1)} %)`
+    : "取得不可";
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  return `${(value / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function updateElasticsearchHealthCard(result) {

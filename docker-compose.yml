@@ -1,4 +1,26 @@
 services:
+  metrics:
+    build:
+      context: .
+      dockerfile: metrics/Dockerfile
+    container_name: qiita-search-metrics
+    environment:
+      PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-qiita_elastic_app}
+      PORT: 8090
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    restart: unless-stopped
+
   backend_python:
     build:
       context: .
@@ -154,6 +176,8 @@ services:
     ports:
       - "8082:8082"
     depends_on:
+      metrics:
+        condition: service_healthy
       backend_python:
         condition: service_healthy
       backend_elixir:
