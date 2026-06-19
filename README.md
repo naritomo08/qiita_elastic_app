@@ -292,7 +292,8 @@ GET /api/<backend>/link-preview?url=https://qiita.com/...
 - Python版は5020、Elixir版は5021、PHP版は5022、Java版は5023、Go版は5024、Ruby版は5025
 - frontend Nginxの `/api/<言語>/...` と `/health/<言語>` に対応する転送設定
 
-フロントエンドは選択されたポート以外、バックエンドの実装言語やElasticsearchクライアントを認識しません。
+フロントエンドは選択された言語のプロキシパス以外、バックエンドの実装や
+Elasticsearchクライアントを認識しません。
 
 ## Elasticsearchドキュメント
 

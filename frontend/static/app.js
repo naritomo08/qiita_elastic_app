@@ -104,7 +104,7 @@ async function renderHealthDashboard() {
         <div>
           <p class="eyebrow">SYSTEM HEALTH</p>
           <h1>稼働状況</h1>
-          <p>ブラウザから各バックエンドとElasticsearchへの接続状態を確認しています。</p>
+          <p>frontendのNginx経由で、各バックエンドとElasticsearchの状態を確認しています。</p>
         </div>
         <button class="health-refresh-button" type="button" data-health-refresh>
           <span aria-hidden="true">↻</span> 今すぐ更新
@@ -178,7 +178,6 @@ function healthCard(key, backend) {
       <h3>${escapeHtml(backend.label)}</h3>
       <p class="health-message">接続状態を確認しています。</p>
       <dl class="health-details">
-        <div><dt>ポート</dt><dd>${backend.port}</dd></div>
         <div><dt>応答時間</dt><dd data-health-latency>—</dd></div>
         <div><dt>CPU</dt><dd data-health-cpu>—</dd></div>
         <div><dt>メモリ</dt><dd data-health-memory>—</dd></div>
@@ -315,8 +314,8 @@ function updateBackendHealthCard(key, result) {
   setHealthCardState(card, result.ok);
   card.querySelector(".health-badge").textContent = result.ok ? "稼働中" : "停止";
   card.querySelector(".health-message").textContent = result.ok
-    ? "フロントエンドから正常に応答しています。"
-    : "応答がありません。コンテナまたはポートを確認してください。";
+    ? "Nginx経由で正常に応答しています。"
+    : "応答がありません。コンテナの状態を確認してください。";
   card.querySelector("[data-health-latency]").textContent = result.ok ? `${result.latency} ms` : "タイムアウト";
 }
 
@@ -363,7 +362,7 @@ function updateElasticsearchHealthCard(result) {
       ? "確認に利用できるバックエンドがありません。"
       : "バックエンドからElasticsearchへ接続できません。";
   card.querySelector("[data-health-via]").textContent = result.checkedBy
-    ? `${BACKENDS[result.checkedBy].label} :${BACKENDS[result.checkedBy].port}`
+    ? BACKENDS[result.checkedBy].label
     : "—";
   card.querySelector("[data-health-latency]").textContent =
     result.ok && Number.isFinite(Number(result.latency)) ? `${result.latency} ms` : "—";
