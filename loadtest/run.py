@@ -18,6 +18,11 @@ METRICS_URL = os.getenv("METRICS_URL", "http://metrics:8090/metrics")
 METRICS_INTERVAL = max(0.5, float(os.getenv("METRICS_INTERVAL", "2")))
 TEST_SCRIPT = os.getenv("K6_SCRIPT", "/opt/loadtest/test.js")
 
+# Bind mount上の結果をホスト側ユーザーから整理できるようにする。
+# Dockerのuser namespace環境では、コンテナ所有者がホスト上で
+# nobody:nobodyに見える場合があるため、グループ書き込みを許可する。
+os.umask(0o002)
+
 
 def timestamp():
     return datetime.now().astimezone().isoformat(timespec="seconds")
