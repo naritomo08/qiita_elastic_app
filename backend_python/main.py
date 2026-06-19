@@ -1,4 +1,5 @@
 import os
+import time
 
 import requests
 from flask import Flask, jsonify, request
@@ -52,6 +53,39 @@ def add_cors_headers(response):
 @app.get("/health")
 def health():
     return jsonify({"status": "ok", "backend": "python"})
+
+
+@app.get("/health/elasticsearch")
+def elasticsearch_health():
+    started_at = time.monotonic()
+    try:
+        response = requests.get(
+            os.getenv("ES_URL", "http://elastic1:9200"),
+            timeout=(2, 3),
+            proxies={"http": None, "https": None},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return jsonify(
+            {
+                "status": "ok",
+                "service": "elasticsearch",
+                "checked_by": "python",
+                "latency_ms": round((time.monotonic() - started_at) * 1000),
+                "cluster_name": payload.get("cluster_name", ""),
+                "version": payload.get("version", {}).get("number", ""),
+            }
+        )
+    except (requests.RequestException, ValueError):
+        return jsonify(
+            {
+                "status": "error",
+                "service": "elasticsearch",
+                "checked_by": "python",
+                "latency_ms": round((time.monotonic() - started_at) * 1000),
+                "error": "Elasticsearch に接続できませんでした。",
+            }
+        ), 503
 
 
 @app.get("/api/recent")

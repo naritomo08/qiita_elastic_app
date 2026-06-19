@@ -13,6 +13,13 @@ defmodule QiitaSearchBackend.Router do
     json(conn, 200, %{"status" => "ok", "backend" => "elixir"})
   end
 
+  get "/health/elasticsearch" do
+    case Elasticsearch.health() do
+      {:ok, result} -> json(conn, 200, result)
+      {:error, status, result} -> json(conn, status, result)
+    end
+  end
+
   get "/api/recent" do
     size = positive_int(conn.params["size"], 10, 100)
     tag = String.trim(conn.params["tag"] || "")

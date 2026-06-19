@@ -10,3 +10,11 @@ backend_elixir/_build/
 backend_elixir/deps/
 backend_elixir/.elixir_ls/
 backend_elixir/cover/
+backend_php/vendor/
+backend_java/target/
+backend_go/bin/
+backend_go/coverage.out
+backend_go/*.test
+backend_ruby/.bundle/
+backend_ruby/vendor/bundle/
+backend_ruby/coverage/

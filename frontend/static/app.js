@@ -3,6 +3,10 @@ import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.mi
 const BACKENDS = {
   python: { label: "Python", port: 5020 },
   elixir: { label: "Elixir", port: 5021 },
+  php: { label: "PHP", port: 5022 },
+  java: { label: "Java", port: 5023 },
+  go: { label: "Go", port: 5024 },
+  ruby: { label: "Ruby", port: 5025 },
 };
 let selectedBackend = localStorage.getItem("qiita-search-backend");
 if (!BACKENDS[selectedBackend]) selectedBackend = "python";
@@ -10,6 +14,9 @@ if (!BACKENDS[selectedBackend]) selectedBackend = "python";
 const app = document.querySelector("#app");
 const apiLink = document.querySelector("#api-link");
 const backendSelect = document.querySelector("#backend-select");
+let healthRefreshTimer;
+let healthRequestId = 0;
+let healthUpdateRunning = false;
 backendSelect.value = selectedBackend;
 
 mermaid.initialize({
@@ -31,6 +38,12 @@ backendSelect.addEventListener("change", async () => {
 });
 
 document.addEventListener("click", async (event) => {
+  const healthRefreshButton = event.target.closest("[data-health-refresh]");
+  if (healthRefreshButton) {
+    await updateHealthDashboard();
+    return;
+  }
+
   const link = event.target.closest("a[data-route]");
   if (!link || link.origin !== location.origin) return;
   event.preventDefault();
@@ -62,10 +75,13 @@ document.addEventListener("submit", (event) => {
 renderRoute();
 
 async function renderRoute() {
+  stopHealthMonitoring();
   window.scrollTo({ top: 0 });
   const path = location.pathname;
   try {
-    if (path.startsWith("/articles/")) {
+    if (path === "/health") {
+      await renderHealthDashboard();
+    } else if (path.startsWith("/articles/")) {
       await renderDetail(decodeURIComponent(path.slice("/articles/".length)));
     } else if (path === "/all") {
       await renderAllArticles();
@@ -77,6 +93,227 @@ async function renderRoute() {
   } catch (error) {
     renderError(error.message || "画面を表示できませんでした。");
   }
+}
+
+async function renderHealthDashboard() {
+  document.title = "稼働状況 | Qiita Article Search";
+  apiLink.href = `${apiBase()}/health/elasticsearch`;
+  app.innerHTML = `
+    <section class="health-page">
+      <div class="health-page-header">
+        <div>
+          <p class="eyebrow">SYSTEM HEALTH</p>
+          <h1>稼働状況</h1>
+          <p>ブラウザから各バックエンドとElasticsearchへの接続状態を確認しています。</p>
+        </div>
+        <button class="health-refresh-button" type="button" data-health-refresh>
+          <span aria-hidden="true">↻</span> 今すぐ更新
+        </button>
+      </div>
+      <div class="health-summary" aria-live="polite">
+        <span class="health-summary-dot is-checking"></span>
+        <strong data-health-summary>確認中…</strong>
+        <time data-health-updated></time>
+      </div>
+      <section class="health-section">
+        <div class="health-section-heading">
+          <div>
+            <p class="eyebrow">BACKENDS</p>
+            <h2>バックエンドコンテナ</h2>
+          </div>
+          <span>5秒ごとに自動更新</span>
+        </div>
+        <div class="health-grid">
+          ${Object.entries(BACKENDS).map(([key, backend]) => healthCard(key, backend)).join("")}
+        </div>
+      </section>
+      <section class="health-section">
+        <div class="health-section-heading">
+          <div>
+            <p class="eyebrow">DATA STORE</p>
+            <h2>Elasticsearch</h2>
+          </div>
+        </div>
+        <div class="health-grid health-grid-elasticsearch">
+          <article class="health-card is-checking" data-elasticsearch-health>
+            <div class="health-card-top">
+              <span class="health-service-icon elasticsearch-icon" aria-hidden="true">E</span>
+              <span class="health-badge">確認中</span>
+            </div>
+            <h3>Elasticsearch</h3>
+            <p class="health-message">接続状態を確認しています。</p>
+            <dl class="health-details">
+              <div><dt>接続経路</dt><dd data-health-via>—</dd></div>
+              <div><dt>応答時間</dt><dd data-health-latency>—</dd></div>
+              <div><dt>バージョン</dt><dd data-health-version>—</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+    </section>
+  `;
+
+  await updateHealthDashboard();
+  healthRefreshTimer = window.setInterval(updateHealthDashboard, 5000);
+}
+
+function healthCard(key, backend) {
+  return `
+    <article class="health-card is-checking" data-backend-health="${key}">
+      <div class="health-card-top">
+        <span class="health-service-icon" aria-hidden="true">${escapeHtml(backend.label.slice(0, 1))}</span>
+        <span class="health-badge">確認中</span>
+      </div>
+      <h3>${escapeHtml(backend.label)}</h3>
+      <p class="health-message">接続状態を確認しています。</p>
+      <dl class="health-details">
+        <div><dt>ポート</dt><dd>${backend.port}</dd></div>
+        <div><dt>応答時間</dt><dd data-health-latency>—</dd></div>
+      </dl>
+    </article>
+  `;
+}
+
+async function updateHealthDashboard() {
+  if (location.pathname !== "/health" || healthUpdateRunning) return;
+  healthUpdateRunning = true;
+  const requestId = ++healthRequestId;
+  const refreshButton = document.querySelector("[data-health-refresh]");
+  refreshButton?.classList.add("is-refreshing");
+  refreshButton?.setAttribute("disabled", "");
+
+  try {
+    const results = await Promise.all(
+      Object.keys(BACKENDS).map(async (key) => [key, await checkBackendHealth(key)])
+    );
+    if (requestId !== healthRequestId || location.pathname !== "/health") return;
+
+    results.forEach(([key, result]) => updateBackendHealthCard(key, result));
+    const healthyKeys = results.filter(([, result]) => result.ok).map(([key]) => key);
+    const elasticsearch = await checkElasticsearchHealth(healthyKeys);
+    if (requestId !== healthRequestId || location.pathname !== "/health") return;
+
+    updateElasticsearchHealthCard(elasticsearch);
+    updateHealthSummary(healthyKeys.length, elasticsearch);
+  } finally {
+    if (requestId === healthRequestId) {
+      healthUpdateRunning = false;
+      refreshButton?.classList.remove("is-refreshing");
+      refreshButton?.removeAttribute("disabled");
+    }
+  }
+}
+
+async function checkBackendHealth(key) {
+  const startedAt = performance.now();
+  try {
+    const response = await fetchWithTimeout(`${backendBase(key)}/health`, 3500);
+    const payload = await response.json();
+    if (!response.ok || payload.status !== "ok") throw new Error();
+    return { ok: true, latency: Math.round(performance.now() - startedAt) };
+  } catch {
+    return { ok: false, latency: Math.round(performance.now() - startedAt) };
+  }
+}
+
+async function checkElasticsearchHealth(healthyKeys) {
+  if (!healthyKeys.length) return { ok: false, unavailable: true };
+  const candidates = [
+    ...(healthyKeys.includes(selectedBackend) ? [selectedBackend] : []),
+    ...healthyKeys.filter((key) => key !== selectedBackend),
+  ];
+
+  const primary = await requestElasticsearchHealth(candidates[0]);
+  if (primary.ok || candidates.length === 1) return primary;
+
+  const fallbacks = await Promise.all(candidates.slice(1).map(requestElasticsearchHealth));
+  return fallbacks.find((result) => result.ok) || primary;
+}
+
+async function requestElasticsearchHealth(key) {
+  try {
+    const response = await fetchWithTimeout(`${backendBase(key)}/health/elasticsearch`, 3500);
+    const payload = await response.json();
+    return {
+      ok: response.ok && payload.status === "ok",
+      checkedBy: key,
+      latency: payload.latency_ms,
+      version: payload.version || "",
+      clusterName: payload.cluster_name || "",
+    };
+  } catch {
+    return { ok: false, checkedBy: key };
+  }
+}
+
+async function fetchWithTimeout(url, timeout) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(url, { signal: controller.signal, cache: "no-store" });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function updateBackendHealthCard(key, result) {
+  const card = document.querySelector(`[data-backend-health="${key}"]`);
+  if (!card) return;
+  setHealthCardState(card, result.ok);
+  card.querySelector(".health-badge").textContent = result.ok ? "稼働中" : "停止";
+  card.querySelector(".health-message").textContent = result.ok
+    ? "フロントエンドから正常に応答しています。"
+    : "応答がありません。コンテナまたはポートを確認してください。";
+  card.querySelector("[data-health-latency]").textContent = result.ok ? `${result.latency} ms` : "タイムアウト";
+}
+
+function updateElasticsearchHealthCard(result) {
+  const card = document.querySelector("[data-elasticsearch-health]");
+  if (!card) return;
+  setHealthCardState(card, result.ok);
+  card.querySelector(".health-badge").textContent = result.ok ? "稼働中" : "接続不可";
+  card.querySelector(".health-message").textContent = result.ok
+    ? `${result.clusterName || "Elasticsearchクラスター"}へ正常に接続できています。`
+    : result.unavailable
+      ? "確認に利用できるバックエンドがありません。"
+      : "バックエンドからElasticsearchへ接続できません。";
+  card.querySelector("[data-health-via]").textContent = result.checkedBy
+    ? `${BACKENDS[result.checkedBy].label} :${BACKENDS[result.checkedBy].port}`
+    : "—";
+  card.querySelector("[data-health-latency]").textContent =
+    result.ok && Number.isFinite(Number(result.latency)) ? `${result.latency} ms` : "—";
+  card.querySelector("[data-health-version]").textContent = result.version || "—";
+}
+
+function setHealthCardState(card, isHealthy) {
+  card.classList.remove("is-checking", "is-healthy", "is-unhealthy");
+  card.classList.add(isHealthy ? "is-healthy" : "is-unhealthy");
+}
+
+function updateHealthSummary(healthyCount, elasticsearch) {
+  const allHealthy = healthyCount === Object.keys(BACKENDS).length && elasticsearch.ok;
+  const summary = document.querySelector("[data-health-summary]");
+  const dot = document.querySelector(".health-summary-dot");
+  const updated = document.querySelector("[data-health-updated]");
+  if (summary) {
+    summary.textContent = allHealthy
+      ? "すべてのサービスが正常です"
+      : `バックエンド ${healthyCount}/${Object.keys(BACKENDS).length} 稼働・Elasticsearch ${elasticsearch.ok ? "正常" : "接続不可"}`;
+  }
+  dot?.classList.remove("is-checking", "is-healthy", "is-unhealthy");
+  dot?.classList.add(allHealthy ? "is-healthy" : "is-unhealthy");
+  if (updated) {
+    const now = new Date();
+    updated.dateTime = now.toISOString();
+    updated.textContent = `最終更新 ${now.toLocaleTimeString("ja-JP")}`;
+  }
+}
+
+function stopHealthMonitoring() {
+  window.clearInterval(healthRefreshTimer);
+  healthRefreshTimer = undefined;
+  healthRequestId += 1;
+  healthUpdateRunning = false;
 }
 
 async function renderAllArticles() {
@@ -491,7 +728,11 @@ async function api(path, params = {}) {
 }
 
 function apiBase() {
-  return `${location.protocol}//${location.hostname}:${BACKENDS[selectedBackend].port}`;
+  return backendBase(selectedBackend);
+}
+
+function backendBase(key) {
+  return `${location.protocol}//${location.hostname}:${BACKENDS[key].port}`;
 }
 
 function renderError(message) {

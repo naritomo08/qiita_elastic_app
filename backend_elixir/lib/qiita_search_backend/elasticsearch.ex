@@ -1,6 +1,33 @@
 defmodule QiitaSearchBackend.Elasticsearch do
   @moduledoc false
 
+  def health do
+    started_at = System.monotonic_time(:millisecond)
+
+    case Req.get(es_url(), receive_timeout: 3_000, retry: false) do
+      {:ok, %{status: 200, body: body}} when is_map(body) ->
+        {:ok,
+         %{
+           "status" => "ok",
+           "service" => "elasticsearch",
+           "checked_by" => "elixir",
+           "latency_ms" => elapsed_ms(started_at),
+           "cluster_name" => Map.get(body, "cluster_name", ""),
+           "version" => get_in(body, ["version", "number"]) || ""
+         }}
+
+      _ ->
+        {:error, 503,
+         %{
+           "status" => "error",
+           "service" => "elasticsearch",
+           "checked_by" => "elixir",
+           "latency_ms" => elapsed_ms(started_at),
+           "error" => "Elasticsearch に接続できませんでした。"
+         }}
+    end
+  end
+
   def recent(size, tag) do
     query =
       if tag == "" do
@@ -148,6 +175,7 @@ defmodule QiitaSearchBackend.Elasticsearch do
 
   defp map_status(status) when status >= 500, do: 502
   defp map_status(_), do: 500
+  defp elapsed_ms(started_at), do: System.monotonic_time(:millisecond) - started_at
 
   defp es_url, do: System.get_env("ES_URL", "http://elastic1:9200") |> String.trim_trailing("/")
   defp index, do: System.get_env("ES_INDEX", "qiita-articles")
