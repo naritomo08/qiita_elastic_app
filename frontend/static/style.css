@@ -731,6 +731,13 @@ mark {
   transform: translateY(0);
 }
 
+.code-copy-button.is-copy-error {
+  color: #ffd1d1;
+  background: #7a3030;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .code-copy-button.is-copied .copy-icon {
   display: none;
 }

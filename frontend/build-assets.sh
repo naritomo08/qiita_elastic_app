@@ -6,6 +6,25 @@ source_dir=${1:-/src}
 output_dir=${2:-/dist}
 static_dir="$output_dir/static"
 
+case "$output_dir" in
+  ""|"/"|"."|"..")
+    echo "Unsafe output directory: $output_dir" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$source_dir" = "$output_dir" ]; then
+  echo "Source and output directories must be different." >&2
+  exit 1
+fi
+
+for required_file in index.html static/style.css static/app.js; do
+  if [ ! -f "$source_dir/$required_file" ]; then
+    echo "Missing source file: $source_dir/$required_file" >&2
+    exit 1
+  fi
+done
+
 rm -rf "$output_dir"
 mkdir -p "$static_dir"
 cp "$source_dir/index.html" "$output_dir/index.html"

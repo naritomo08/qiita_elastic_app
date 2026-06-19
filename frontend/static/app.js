@@ -373,43 +373,55 @@ function enhanceCodeBlocks() {
     wrapper.append(button);
 
     button.addEventListener("click", async () => {
+      window.clearTimeout(button.copyStatusTimer);
       try {
         await copyText(code.textContent);
+        button.classList.remove("is-copy-error");
         button.classList.add("is-copied");
         button.setAttribute("aria-label", "コピーしました");
         button.title = "コピーしました";
         button.querySelector(".code-copy-status").textContent = "コピーしました";
-        window.setTimeout(() => {
-          button.classList.remove("is-copied");
-          button.setAttribute("aria-label", "コードをコピー");
-          button.title = "コードをコピー";
-          button.querySelector(".code-copy-status").textContent = "";
-        }, 1800);
       } catch {
+        button.classList.remove("is-copied");
+        button.classList.add("is-copy-error");
         button.setAttribute("aria-label", "コピーできませんでした");
         button.title = "コピーできませんでした";
         button.querySelector(".code-copy-status").textContent = "コピーできませんでした";
       }
+      button.copyStatusTimer = window.setTimeout(() => {
+        button.classList.remove("is-copied", "is-copy-error");
+        button.setAttribute("aria-label", "コードをコピー");
+        button.title = "コードをコピー";
+        button.querySelector(".code-copy-status").textContent = "";
+      }, 1800);
     });
   });
 }
 
 async function copyText(value) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // 権限やブラウザ制限で失敗した場合は、従来方式を試す。
+    }
   }
 
+  const activeElement = document.activeElement;
   const textarea = document.createElement("textarea");
   textarea.value = value;
   textarea.setAttribute("readonly", "");
   textarea.style.position = "fixed";
   textarea.style.opacity = "0";
   document.body.append(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-  if (!copied) throw new Error("Copy failed");
+  try {
+    textarea.select();
+    if (!document.execCommand("copy")) throw new Error("Copy failed");
+  } finally {
+    textarea.remove();
+    activeElement?.focus();
+  }
 }
 
 async function renderLinkPreviews() {

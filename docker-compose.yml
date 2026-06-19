@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend_python/Dockerfile
-    container_name: qiita-search-backend
+    container_name: qiita-search-backend-python
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
