@@ -1,12 +1,12 @@
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
 
 const BACKENDS = {
-  python: { label: "Python", port: 5020 },
-  elixir: { label: "Elixir", port: 5021 },
-  php: { label: "PHP", port: 5022 },
-  java: { label: "Java", port: 5023 },
-  go: { label: "Go", port: 5024 },
-  ruby: { label: "Ruby", port: 5025 },
+  python: { label: "Python" },
+  elixir: { label: "Elixir" },
+  php: { label: "PHP" },
+  java: { label: "Java" },
+  go: { label: "Go" },
+  ruby: { label: "Ruby" },
 };
 let selectedBackend = localStorage.getItem("qiita-search-backend");
 if (!BACKENDS[selectedBackend]) selectedBackend = "python";
@@ -97,7 +97,7 @@ async function renderRoute() {
 
 async function renderHealthDashboard() {
   document.title = "稼働状況 | Qiita Article Search";
-  apiLink.href = `${apiBase()}/health/elasticsearch`;
+  apiLink.href = healthPath(selectedBackend, "/elasticsearch");
   app.innerHTML = `
     <section class="health-page">
       <div class="health-page-header">
@@ -260,7 +260,7 @@ async function checkContainerMetrics() {
 async function checkBackendHealth(key) {
   const startedAt = performance.now();
   try {
-    const response = await fetchWithTimeout(`${backendBase(key)}/health`, 3500);
+    const response = await fetchWithTimeout(healthPath(key), 3500);
     const payload = await response.json();
     if (!response.ok || payload.status !== "ok") throw new Error();
     return { ok: true, latency: Math.round(performance.now() - startedAt) };
@@ -285,7 +285,7 @@ async function checkElasticsearchHealth(healthyKeys) {
 
 async function requestElasticsearchHealth(key) {
   try {
-    const response = await fetchWithTimeout(`${backendBase(key)}/health/elasticsearch`, 3500);
+    const response = await fetchWithTimeout(healthPath(key, "/elasticsearch"), 3500);
     const payload = await response.json();
     return {
       ok: response.ok && payload.status === "ok",
@@ -408,7 +408,7 @@ async function renderAllArticles() {
   const data = await api("/api/articles", { page, size });
   const totalPages = Math.max(1, Math.ceil(data.total / size));
   document.title = "全記事一覧 | Qiita Article Search";
-  apiLink.href = `${apiBase()}/api/articles?${new URLSearchParams({ page, size })}`;
+  apiLink.href = apiPath("/api/articles", { page, size });
 
   app.innerHTML = `
     <section class="all-articles-header">
@@ -435,7 +435,7 @@ async function renderHome() {
   const tag = params.get("tag")?.trim() || "";
   const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
   document.title = "Qiita Article Search";
-  apiLink.href = `${apiBase()}/api/search?q=Elasticsearch`;
+  apiLink.href = apiPath("/api/search", { q: "Elasticsearch" });
 
   app.innerHTML = `
     <section class="hero">
@@ -504,7 +504,7 @@ async function renderSearch() {
   const data = await api("/api/search", { q, page, size });
   const totalPages = Math.max(1, Math.ceil(data.total / size));
   document.title = `「${q}」の検索結果 | Qiita Article Search`;
-  apiLink.href = `${apiBase()}/api/search?${new URLSearchParams({ q, page, size })}`;
+  apiLink.href = apiPath("/api/search", { q, page, size });
 
   app.innerHTML = `
     <section class="search-header">${searchForm(q, size)}</section>
@@ -527,7 +527,7 @@ async function renderSearch() {
 async function renderDetail(articleId) {
   const article = await api(`/api/articles/${encodeURIComponent(articleId)}`);
   document.title = `${article.title || "無題の記事"} | Qiita Article Search`;
-  apiLink.href = `${apiBase()}/api/articles/${encodeURIComponent(articleId)}`;
+  apiLink.href = apiPath(`/api/articles/${encodeURIComponent(articleId)}`);
 
   const source = removeDangerousBlocks(article.body || "本文がありません。");
   const markdownHtml = DOMPurify.sanitize(marked.parse(source), {
@@ -799,11 +799,7 @@ function secureArticleLinks() {
 }
 
 async function api(path, params = {}) {
-  const query = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== "" && value != null) query.set(key, value);
-  });
-  const response = await fetch(`${apiBase()}${path}${query.size ? `?${query}` : ""}`);
+  const response = await fetch(apiPath(path, params));
   let payload;
   try {
     payload = await response.json();
@@ -814,12 +810,17 @@ async function api(path, params = {}) {
   return payload;
 }
 
-function apiBase() {
-  return backendBase(selectedBackend);
+function apiPath(path, params = {}) {
+  const normalizedPath = path.replace(/^\/api\/?/, "");
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== "" && value != null) query.set(key, value);
+  });
+  return `/api/${selectedBackend}/${normalizedPath}${query.size ? `?${query}` : ""}`;
 }
 
-function backendBase(key) {
-  return `${location.protocol}//${location.hostname}:${BACKENDS[key].port}`;
+function healthPath(key, suffix = "") {
+  return `/health/${key}${suffix}`;
 }
 
 function renderError(message) {

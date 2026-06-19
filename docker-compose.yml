@@ -32,8 +32,8 @@ services:
       BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
       BACKEND_PORT: ${BACKEND_PORT:-5020}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
-    ports:
-      - "5020:5020"
+    expose:
+      - "5020"
     healthcheck:
       test:
         - CMD
@@ -58,8 +58,8 @@ services:
       ES_INDEX: ${ES_INDEX:-qiita-articles}
       BACKEND_PORT: 5021
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
-    ports:
-      - "5021:5021"
+    expose:
+      - "5021"
     healthcheck:
       test:
         - CMD
@@ -87,8 +87,8 @@ services:
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 5022
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
-    ports:
-      - "5022:5022"
+    expose:
+      - "5022"
     healthcheck:
       test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:5022/health') === false ? 1 : 0);"]
       interval: 10s
@@ -110,8 +110,8 @@ services:
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 5023
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
-    ports:
-      - "5023:5023"
+    expose:
+      - "5023"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5023/health"]
       interval: 10s
@@ -133,8 +133,8 @@ services:
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 5024
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
-    ports:
-      - "5024:5024"
+    expose:
+      - "5024"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5024/health"]
       interval: 10s
@@ -156,8 +156,8 @@ services:
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 5025
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
-    ports:
-      - "5025:5025"
+    expose:
+      - "5025"
     healthcheck:
       test: ["CMD", "ruby", "-rnet/http", "-e", "Net::HTTP.get(URI('http://127.0.0.1:5025/health'))"]
       interval: 10s

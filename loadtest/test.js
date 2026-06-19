@@ -14,7 +14,7 @@ export const options = buildOptions();
 
 export default function () {
   const path = selectPath();
-  const response = http.get(`${targetUrl}${path}`, {
+  const response = http.get(`${targetUrl}${targetPath(path)}`, {
     tags: { endpoint: path.split("?")[0] },
     timeout: __ENV.REQUEST_TIMEOUT || "10s",
   });
@@ -26,6 +26,12 @@ export default function () {
   });
 
   if (sleepSeconds > 0) sleep(sleepSeconds);
+}
+
+function targetPath(path) {
+  return /\/api\/(?:python|elixir|php|java|go|ruby)$/.test(targetUrl)
+    ? path.replace(/^\/api/, "")
+    : path;
 }
 
 function selectPath() {
