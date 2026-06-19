@@ -18,3 +18,4 @@ backend_go/*.test
 backend_ruby/.bundle/
 backend_ruby/vendor/bundle/
 backend_ruby/coverage/
+loadtest/results/

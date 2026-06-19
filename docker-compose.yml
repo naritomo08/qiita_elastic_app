@@ -191,3 +191,28 @@ services:
       backend_ruby:
         condition: service_healthy
     restart: unless-stopped
+
+  loadtest:
+    profiles:
+      - loadtest
+    build:
+      context: .
+      dockerfile: loadtest/Dockerfile
+    environment:
+      TARGET_URL: ${TARGET_URL:-}
+      SCENARIO: ${SCENARIO:-mixed}
+      SEARCH_QUERY: ${SEARCH_QUERY:-Elasticsearch}
+      VUS: ${VUS:-20}
+      DURATION: ${DURATION:-1m}
+      STAGES: ${STAGES:-}
+      SLEEP_SECONDS: ${SLEEP_SECONDS:-0.2}
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-10s}
+      MAX_ERROR_RATE: ${MAX_ERROR_RATE:-0.01}
+      P95_LIMIT_MS: ${P95_LIMIT_MS:-1000}
+      METRICS_URL: http://metrics:8090/metrics
+      METRICS_INTERVAL: ${METRICS_INTERVAL:-2}
+    volumes:
+      - ./loadtest/results:/results
+    depends_on:
+      metrics:
+        condition: service_healthy

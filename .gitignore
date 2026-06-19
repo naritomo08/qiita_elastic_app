@@ -53,6 +53,8 @@ backend_ruby/coverage/
 .coverage.*
 htmlcov/
 coverage.xml
+loadtest/results/*
+!loadtest/results/.gitkeep
 
 # Logs and runtime files
 *.log
