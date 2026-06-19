@@ -479,7 +479,8 @@ function articleGrid(articles, selectedTag) {
       ? emptyState(`「${escapeHtml(selectedTag)}」の記事は見つかりませんでした`, '<a href="/" data-route>絞り込みを解除して記事一覧へ戻る</a>')
       : emptyState("記事はまだありません", "Elasticsearch インデックスに記事を投入すると、ここに表示されます。");
   }
-  return `<div class="article-grid">${articles.map(articleCard).join("")}</div>`;
+  const dateField = selectedTag ? "created" : "updated";
+  return `<div class="article-grid">${articles.map((article) => articleCard(article, dateField)).join("")}</div>`;
 }
 
 function articleCard(article, dateField = "updated") {
