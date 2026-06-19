@@ -230,7 +230,9 @@ async function renderDetail(articleId) {
   `;
 
   secureArticleLinks();
-  await Promise.all([renderMermaid(), renderLinkPreviews()]);
+  await renderMermaid();
+  enhanceCodeBlocks();
+  await renderLinkPreviews();
 }
 
 function articleGrid(articles, selectedTag) {
@@ -339,6 +341,75 @@ async function renderMermaid() {
       diagram.outerHTML = `<p class="mermaid-error-message">Mermaid図を描画できないため、定義を表示しています。</p><pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
     }
   }
+}
+
+function enhanceCodeBlocks() {
+  document.querySelectorAll(".markdown-body pre").forEach((pre) => {
+    if (pre.parentElement?.classList.contains("code-block")) return;
+
+    const code = pre.querySelector(":scope > code");
+    if (!code) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+    pre.before(wrapper);
+    wrapper.append(pre);
+
+    const button = document.createElement("button");
+    button.className = "code-copy-button";
+    button.type = "button";
+    button.setAttribute("aria-label", "コードをコピー");
+    button.title = "コードをコピー";
+    button.innerHTML = `
+      <svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M8 8V5.8A1.8 1.8 0 0 1 9.8 4h8.4A1.8 1.8 0 0 1 20 5.8v8.4a1.8 1.8 0 0 1-1.8 1.8H16"></path>
+        <rect x="4" y="8" width="12" height="12" rx="2"></rect>
+      </svg>
+      <svg class="check-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <path d="m5 12 4 4L19 6"></path>
+      </svg>
+      <span class="sr-only code-copy-status" aria-live="polite"></span>
+    `;
+    wrapper.append(button);
+
+    button.addEventListener("click", async () => {
+      try {
+        await copyText(code.textContent);
+        button.classList.add("is-copied");
+        button.setAttribute("aria-label", "コピーしました");
+        button.title = "コピーしました";
+        button.querySelector(".code-copy-status").textContent = "コピーしました";
+        window.setTimeout(() => {
+          button.classList.remove("is-copied");
+          button.setAttribute("aria-label", "コードをコピー");
+          button.title = "コードをコピー";
+          button.querySelector(".code-copy-status").textContent = "";
+        }, 1800);
+      } catch {
+        button.setAttribute("aria-label", "コピーできませんでした");
+        button.title = "コピーできませんでした";
+        button.querySelector(".code-copy-status").textContent = "コピーできませんでした";
+      }
+    });
+  });
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Copy failed");
 }
 
 async function renderLinkPreviews() {

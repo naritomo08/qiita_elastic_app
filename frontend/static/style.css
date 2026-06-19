@@ -664,6 +664,88 @@ mark {
   line-height: 1.65;
 }
 
+.code-block {
+  position: relative;
+  margin: 1.2em 0;
+}
+
+.markdown-body .code-block pre {
+  margin: 0;
+}
+
+.code-copy-button {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(229, 238, 232, 0.28);
+  border-radius: 8px;
+  color: #e5eee8;
+  background: rgba(43, 59, 50, 0.94);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.code-block:hover .code-copy-button,
+.code-copy-button:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.code-copy-button:hover,
+.code-copy-button:focus-visible {
+  background: #3b5145;
+}
+
+.code-copy-button:focus-visible {
+  outline: 3px solid rgba(85, 197, 129, 0.55);
+  outline-offset: 2px;
+}
+
+.code-copy-button svg {
+  grid-area: 1 / 1;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.code-copy-button .check-icon {
+  display: none;
+}
+
+.code-copy-button.is-copied {
+  color: #b8f4ce;
+  background: #245b3c;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.code-copy-button.is-copied .copy-icon {
+  display: none;
+}
+
+.code-copy-button.is-copied .check-icon {
+  display: block;
+}
+
+@media (hover: none) {
+  .code-copy-button {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .markdown-body pre code {
   padding: 0;
   color: inherit;
