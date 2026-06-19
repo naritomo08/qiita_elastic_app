@@ -1,8 +1,13 @@
 import unittest
+from unittest.mock import Mock
 
 
 from backend_python import main
-from backend_python.elasticsearch_client import ArticleNotFoundError, SearchResult
+from backend_python.elasticsearch_client import (
+    ArticleNotFoundError,
+    QiitaArticleRepository,
+    SearchResult,
+)
 
 
 ARTICLE = {
@@ -81,6 +86,30 @@ class BackendTestCase(unittest.TestCase):
             "/api/link-preview?url=http://127.0.0.1:9200/private"
         )
         self.assertEqual(response.status_code, 400)
+
+
+class QiitaArticleRepositoryTestCase(unittest.TestCase):
+    def setUp(self):
+        self.repository = QiitaArticleRepository.__new__(QiitaArticleRepository)
+        self.repository._search = Mock(return_value={"hits": {"hits": []}})
+
+    def test_recent_articles_sort_by_updated_at_without_tag(self):
+        self.repository.recent_articles()
+
+        body = self.repository._search.call_args.args[0]
+        self.assertEqual(
+            body["sort"],
+            [{"updated_at": {"order": "desc", "unmapped_type": "date"}}],
+        )
+
+    def test_recent_articles_sort_by_created_at_with_tag(self):
+        self.repository.recent_articles(tag="Python")
+
+        body = self.repository._search.call_args.args[0]
+        self.assertEqual(
+            body["sort"],
+            [{"created_at": {"order": "desc", "unmapped_type": "date"}}],
+        )
 
 
 if __name__ == "__main__":

@@ -58,10 +58,11 @@ class QiitaArticleRepository:
                     "minimum_should_match": 1,
                 }
             }
+        sort_field = "created_at" if tag else "updated_at"
         response = self._search(
             {
                 "query": query,
-                "sort": [{"updated_at": {"order": "desc", "unmapped_type": "date"}}],
+                "sort": [{sort_field: {"order": "desc", "unmapped_type": "date"}}],
                 "size": size,
             }
         )

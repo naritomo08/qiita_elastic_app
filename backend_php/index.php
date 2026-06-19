@@ -266,9 +266,10 @@ if ($path === '/api/recent') {
         ],
         'minimum_should_match' => 1,
     ]];
+    $sortField = $tag === '' ? 'updated_at' : 'created_at';
     [, $results] = parse_hits(es_search([
         'query' => $query,
-        'sort' => [['updated_at' => ['order' => 'desc', 'unmapped_type' => 'date']]],
+        'sort' => [[$sortField => ['order' => 'desc', 'unmapped_type' => 'date']]],
         'size' => $size,
     ]));
     json_response(200, ['total' => count($results), 'results' => $results]);

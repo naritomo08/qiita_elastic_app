@@ -347,6 +347,11 @@ a.tag:hover {
   color: var(--green-dark);
 }
 
+.filter-result-count {
+  padding-left: 10px;
+  border-left: 1px solid #bdd9c7;
+}
+
 .active-filter a {
   margin-left: auto;
   color: var(--green-dark);

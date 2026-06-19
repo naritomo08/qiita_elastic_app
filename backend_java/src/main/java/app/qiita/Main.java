@@ -100,9 +100,10 @@ public final class Main {
                 ),
                 "minimum_should_match", 1
             ));
+        String sortField = tag.isEmpty() ? "updated_at" : "created_at";
         Map<String, Object> response = esSearch(Map.of(
             "query", query,
-            "sort", List.of(Map.of("updated_at", Map.of("order", "desc", "unmapped_type", "date"))),
+            "sort", List.of(Map.of(sortField, Map.of("order", "desc", "unmapped_type", "date"))),
             "size", size
         ));
         Hits hits = parseHits(response);

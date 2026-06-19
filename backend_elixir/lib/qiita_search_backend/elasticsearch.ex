@@ -44,9 +44,11 @@ defmodule QiitaSearchBackend.Elasticsearch do
         }
       end
 
+    sort_field = if tag == "", do: "updated_at", else: "created_at"
+
     search(%{
       "query" => query,
-      "sort" => [%{"updated_at" => %{"order" => "desc", "unmapped_type" => "date"}}],
+      "sort" => [%{sort_field => %{"order" => "desc", "unmapped_type" => "date"}}],
       "size" => size
     })
     |> parse_results()

@@ -124,9 +124,13 @@ func (s *server) recent(w http.ResponseWriter, r *http.Request) {
 			"minimum_should_match": 1,
 		}}
 	}
+	sortField := "updated_at"
+	if tag != "" {
+		sortField = "created_at"
+	}
 	body := map[string]any{
 		"query": query,
-		"sort":  []any{map[string]any{"updated_at": map[string]any{"order": "desc", "unmapped_type": "date"}}},
+		"sort":  []any{map[string]any{sortField: map[string]any{"order": "desc", "unmapped_type": "date"}}},
 		"size":  size,
 	}
 	response, err := s.esSearch(r.Context(), body)

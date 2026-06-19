@@ -390,12 +390,13 @@ function homeArticleSection(articles, tag) {
           <p class="eyebrow">${tag ? "TAG FILTER" : "RECENTLY UPDATED"}</p>
           <h2>${tag ? `「${escapeHtml(tag)}」の記事` : "最近更新された記事"}</h2>
         </div>
-        <span class="article-count">${articles.length} articles</span>
+        <span class="article-count">${articles.length.toLocaleString()} 件</span>
       </div>
       ${tag ? `
         <div class="active-filter">
           <span>タグで絞り込み中</span>
           <strong>${escapeHtml(tag)}</strong>
+          <span class="filter-result-count">表示件数 <strong>${articles.length.toLocaleString()} 件</strong></span>
           <a href="/" data-route data-clear-tag>絞り込みを解除 ×</a>
         </div>` : ""}
       ${articleGrid(articles, tag)}

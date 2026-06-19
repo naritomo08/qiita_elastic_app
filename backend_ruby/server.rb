@@ -84,9 +84,10 @@ class Backend
         }
       }
     end
+    sort_field = tag.empty? ? :updated_at : :created_at
     response = es_search(
       query: query,
-      sort: [{ updated_at: { order: "desc", unmapped_type: "date" } }],
+      sort: [{ sort_field => { order: "desc", unmapped_type: "date" } }],
       size: size
     )
     _, results = parse_hits(response)
