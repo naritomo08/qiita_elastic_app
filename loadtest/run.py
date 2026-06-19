@@ -20,8 +20,9 @@ TEST_SCRIPT = os.getenv("K6_SCRIPT", "/opt/loadtest/test.js")
 
 # Bind mount上の結果をホスト側ユーザーから整理できるようにする。
 # Dockerのuser namespace環境では、コンテナ所有者がホスト上で
-# nobody:nobodyに見える場合があるため、グループ書き込みを許可する。
-os.umask(0o002)
+# nobody:nobodyに見え、グループ権限も利用できない場合がある。
+# 負荷試験の生成物だけを対象に、ホストから削除可能な権限で作成する。
+os.umask(0o000)
 
 
 def timestamp():
