@@ -1,6 +1,7 @@
 import http.client
 import json
 import os
+import re
 import socket
 import socketserver
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ JST = timezone(timedelta(hours=9))
 LOG_TAIL_DEFAULT = 200
 LOG_TAIL_MAX = 1000
 LOG_FULL_DAY_MAX = 20000
+DATE_PARAM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def read_host_hostname():
@@ -153,25 +155,41 @@ def demux_docker_log_stream(data):
     return lines
 
 
-def start_of_today_jst_epoch():
-    """Unix timestamp for the most recent midnight in JST (UTC+9, no DST)."""
-    now_jst = datetime.now(JST)
-    start_jst = now_jst.replace(hour=0, minute=0, second=0, microsecond=0)
-    return int(start_jst.timestamp())
-
-
 def today_jst_date():
     """Date partition key (YYYY-MM-DD) for the current day in JST."""
     return datetime.now(JST).date().isoformat()
 
 
-def container_logs(service, tail, since):
+def parse_date_param(value):
+    """Validate a `date=YYYY-MM-DD` query param. Returns None when absent/empty
+    (caller should then default to today), or raises ValueError when malformed."""
+    if value is None or value == "":
+        return None
+    if not DATE_PARAM_RE.match(value):
+        raise ValueError(f"invalid date: {value}")
+    datetime.strptime(value, "%Y-%m-%d")  # rejects calendar-invalid dates (e.g. 13th month)
+    return value
+
+
+def day_bounds_jst(date_str):
+    """Unix timestamp range [since, until) covering one JST calendar date
+    (today when date_str is None), used to pass to Docker's logs `since`/`until`
+    so only that day's lines are read instead of scanning the full log."""
+    if date_str is None:
+        start_jst = datetime.now(JST).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start_jst = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=JST)
+    end_jst = start_jst + timedelta(days=1)
+    return int(start_jst.timestamp()), int(end_jst.timestamp())
+
+
+def container_logs(service, tail, since, until):
     container = find_container(service)
     if container is None:
         raise RuntimeError(f"container not found for service: {service}")
     status, body = docker_get_raw(
         f"/containers/{quote(container['Id'])}/logs"
-        f"?stdout=1&stderr=1&timestamps=1&tail={tail}&since={since}"
+        f"?stdout=1&stderr=1&timestamps=1&tail={tail}&since={since}&until={until}"
     )
     if status != 200:
         raise RuntimeError(f"Docker API returned {status}")
@@ -238,11 +256,16 @@ class Handler(BaseHTTPRequestHandler):
         if not service:
             self.send_json(400, {"error": "service is required"})
             return
+        try:
+            date_param = parse_date_param((query.get("date") or [None])[0])
+        except ValueError:
+            self.send_json(400, {"error": "invalid date, expected YYYY-MM-DD"})
+            return
         full = (query.get("full") or [""])[0] == "1"
         tail = LOG_FULL_DAY_MAX if full else parse_tail((query.get("tail") or [None])[0])
-        since = start_of_today_jst_epoch()
+        since, until = day_bounds_jst(date_param)
         try:
-            container, lines = container_logs(service, tail, since)
+            container, lines = container_logs(service, tail, since, until)
             container_name = container_display_name(container)
             logs = [
                 enrich_log_entry(entry, service, HOST_HOSTNAME, container_name)
@@ -256,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                     "service": service,
                     "host": HOST_HOSTNAME,
                     "container": container_name,
-                    "date": today_jst_date(),
+                    "date": date_param or today_jst_date(),
                     "count": len(logs),
                     "logs": logs,
                 },

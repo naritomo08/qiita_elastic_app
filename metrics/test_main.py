@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from main import (
     JST,
@@ -7,12 +7,13 @@ from main import (
     LOG_TAIL_MAX,
     container_display_name,
     cpu_percent,
+    day_bounds_jst,
     demux_docker_log_stream,
     enrich_log_entry,
     memory_values,
     parse_access_log_entry,
+    parse_date_param,
     parse_tail,
-    start_of_today_jst_epoch,
     today_jst_date,
 )
 
@@ -63,11 +64,30 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(parse_tail(str(LOG_TAIL_MAX + 500)), LOG_TAIL_MAX)
         self.assertEqual(parse_tail("50"), 50)
 
-    def test_start_of_today_jst_epoch_is_midnight_jst_of_today(self):
-        epoch = start_of_today_jst_epoch()
-        at_jst = datetime.fromtimestamp(epoch, JST)
-        self.assertEqual((at_jst.hour, at_jst.minute, at_jst.second), (0, 0, 0))
-        self.assertEqual(at_jst.date(), datetime.now(JST).date())
+    def test_day_bounds_jst_defaults_to_today_midnight_to_midnight(self):
+        since, until = day_bounds_jst(None)
+        since_jst = datetime.fromtimestamp(since, JST)
+        until_jst = datetime.fromtimestamp(until, JST)
+        self.assertEqual((since_jst.hour, since_jst.minute, since_jst.second), (0, 0, 0))
+        self.assertEqual(since_jst.date(), datetime.now(JST).date())
+        self.assertEqual(until_jst - since_jst, timedelta(days=1))
+
+    def test_day_bounds_jst_covers_exactly_the_given_date(self):
+        since, until = day_bounds_jst("2026-06-15")
+        self.assertEqual(datetime.fromtimestamp(since, JST).isoformat(), "2026-06-15T00:00:00+09:00")
+        self.assertEqual(datetime.fromtimestamp(until, JST).isoformat(), "2026-06-16T00:00:00+09:00")
+
+    def test_parse_date_param_accepts_none_or_empty_as_unspecified(self):
+        self.assertIsNone(parse_date_param(None))
+        self.assertIsNone(parse_date_param(""))
+
+    def test_parse_date_param_accepts_valid_date(self):
+        self.assertEqual(parse_date_param("2026-06-20"), "2026-06-20")
+
+    def test_parse_date_param_rejects_malformed_or_invalid_dates(self):
+        for value in ("abc", "2026/06/20", "2026-13-99", "2026-02-30"):
+            with self.assertRaises(ValueError):
+                parse_date_param(value)
 
     def test_parse_access_log_entry_strips_docker_timestamp_prefix(self):
         line = '2026-06-20T12:48:12.614625716Z {"status": 200, "uri": "/"}'
