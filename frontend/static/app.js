@@ -520,7 +520,7 @@ async function renderAllArticles() {
 async function renderHome() {
   const params = new URLSearchParams(location.search);
   const tag = params.get("tag")?.trim() || "";
-  const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
+  const { recent, total } = await fetchHomeData(tag);
   document.title = "Qiita Article Search";
 
   app.innerHTML = `
@@ -528,9 +528,13 @@ async function renderHome() {
       <p class="eyebrow">TECH ARTICLE DISCOVERY</p>
       <h1>知りたい技術を、<br>すばやく見つける。</h1>
       <p class="hero-copy">Elasticsearch に登録された Qiita 記事を、タイトル・本文・タグから横断検索できます。</p>
+      <div class="article-total" aria-label="現在の記事総数">
+        <span>現在の記事総数</span>
+        <strong data-home-total>${total.toLocaleString("ja-JP")}<small> 件</small></strong>
+      </div>
       ${searchForm("")}
     </section>
-    ${homeArticleSection(data.results, tag)}
+    ${homeArticleSection(recent.results, tag)}
   `;
   startHomeMonitoring(tag);
 }
@@ -548,10 +552,14 @@ async function updateHomeArticles(tag) {
   section.setAttribute("aria-busy", "true");
   section.querySelector("[data-home-refresh]")?.setAttribute("disabled", "");
   try {
-    const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
+    const { recent, total } = await fetchHomeData(tag);
     const currentTag = new URLSearchParams(location.search).get("tag")?.trim() || "";
     if (location.pathname !== "/" || currentTag !== tag) return;
-    section.outerHTML = homeArticleSection(data.results, tag);
+    const totalElement = document.querySelector("[data-home-total]");
+    if (totalElement) {
+      totalElement.innerHTML = `${total.toLocaleString("ja-JP")}<small> 件</small>`;
+    }
+    section.outerHTML = homeArticleSection(recent.results, tag);
   } catch (error) {
     section.classList.remove("is-updating");
     section.removeAttribute("aria-busy");
@@ -560,6 +568,17 @@ async function updateHomeArticles(tag) {
   } finally {
     homeUpdateRunning = false;
   }
+}
+
+async function fetchHomeData(tag) {
+  const [recent, articleList] = await Promise.all([
+    api("/api/recent", { size: tag ? 50 : 10, tag }),
+    api("/api/articles", { page: 1, size: 1 }),
+  ]);
+  return {
+    recent,
+    total: Number(articleList.total) || 0,
+  };
 }
 
 function homeArticleSection(articles, tag) {
