@@ -8,16 +8,21 @@ const BACKENDS = {
   go: { label: "Go" },
   ruby: { label: "Ruby" },
 };
+const BACKEND_CHECK_INTERVAL = 15000;
+const HOME_REFRESH_INTERVAL = 30000;
 let selectedBackend = localStorage.getItem("qiita-search-backend");
 if (!BACKENDS[selectedBackend]) selectedBackend = "python";
 
 const app = document.querySelector("#app");
-const apiLink = document.querySelector("#api-link");
 const backendSelect = document.querySelector("#backend-select");
+let availableBackendKeys = new Set(Object.keys(BACKENDS));
+let backendAvailabilityKnown = false;
+let backendRefreshTimer;
 let healthRefreshTimer;
 let healthRequestId = 0;
 let healthUpdateRunning = false;
-backendSelect.value = selectedBackend;
+let homeRefreshTimer;
+let homeUpdateRunning = false;
 
 mermaid.initialize({
   startOnLoad: false,
@@ -31,6 +36,7 @@ marked.setOptions({ gfm: true, breaks: true });
 
 window.addEventListener("popstate", renderRoute);
 backendSelect.addEventListener("change", async () => {
+  if (!BACKENDS[backendSelect.value]) return;
   selectedBackend = backendSelect.value;
   localStorage.setItem("qiita-search-backend", selectedBackend);
   app.innerHTML = `<div class="loading-state">${BACKENDS[selectedBackend].label}バックエンドへ切り替え中…</div>`;
@@ -41,6 +47,13 @@ document.addEventListener("click", async (event) => {
   const healthRefreshButton = event.target.closest("[data-health-refresh]");
   if (healthRefreshButton) {
     await updateHealthDashboard();
+    return;
+  }
+
+  const homeRefreshButton = event.target.closest("[data-home-refresh]");
+  if (homeRefreshButton) {
+    const tag = new URLSearchParams(location.search).get("tag")?.trim() || "";
+    await updateHomeArticles(tag);
     return;
   }
 
@@ -72,12 +85,23 @@ document.addEventListener("submit", (event) => {
   renderRoute();
 });
 
-renderRoute();
+bootstrap();
+
+async function bootstrap() {
+  await refreshBackendAvailability();
+  await renderRoute();
+  backendRefreshTimer = window.setInterval(refreshBackendAvailability, BACKEND_CHECK_INTERVAL);
+}
 
 async function renderRoute() {
   stopHealthMonitoring();
+  stopHomeMonitoring();
   window.scrollTo({ top: 0 });
   const path = location.pathname;
+  if (!availableBackendKeys.size && path !== "/health") {
+    renderBackendUnavailable();
+    return;
+  }
   try {
     if (path === "/health") {
       await renderHealthDashboard();
@@ -92,12 +116,14 @@ async function renderRoute() {
     }
   } catch (error) {
     renderError(error.message || "画面を表示できませんでした。");
+  } finally {
+    app.dataset.ready = "true";
+    showPendingBackendNotice();
   }
 }
 
 async function renderHealthDashboard() {
   document.title = "稼働状況 | Qiita Article Search";
-  apiLink.href = healthPath(selectedBackend, "/elasticsearch");
   app.innerHTML = `
     <section class="health-page">
       <div class="health-page-header">
@@ -268,6 +294,69 @@ async function checkBackendHealth(key) {
   }
 }
 
+async function refreshBackendAvailability() {
+  const hadAvailableBackends = availableBackendKeys.size > 0;
+  const results = await Promise.all(
+    Object.keys(BACKENDS).map(async (key) => [key, await checkBackendAvailability(key)])
+  );
+  const healthyKeys = results.filter(([, result]) => result.ok).map(([key]) => key);
+  availableBackendKeys = new Set(healthyKeys);
+  backendAvailabilityKnown = true;
+
+  const previousBackend = selectedBackend;
+  if (!availableBackendKeys.has(selectedBackend) && healthyKeys.length) {
+    selectedBackend = healthyKeys[0];
+    localStorage.setItem("qiita-search-backend", selectedBackend);
+  }
+  updateBackendSelector();
+
+  if (
+    app.dataset.ready === "true" &&
+    (previousBackend !== selectedBackend || (!hadAvailableBackends && healthyKeys.length))
+  ) {
+    if (previousBackend !== selectedBackend) {
+      showBackendSwitchNotice(previousBackend, selectedBackend);
+    }
+    await renderRoute();
+  } else if (!healthyKeys.length && app.dataset.ready === "true" && location.pathname !== "/health") {
+    renderBackendUnavailable();
+  }
+}
+
+async function checkBackendAvailability(key) {
+  try {
+    const response = await fetchWithTimeout(healthPath(key, "/elasticsearch"), 3500);
+    const payload = await response.json();
+    return { ok: response.ok && payload.status === "ok" };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function updateBackendSelector() {
+  const keys = Object.keys(BACKENDS).filter((key) => availableBackendKeys.has(key));
+  if (!keys.length) {
+    backendSelect.innerHTML = `<option value="">利用可能なBackendなし</option>`;
+    backendSelect.disabled = true;
+    return;
+  }
+
+  backendSelect.disabled = false;
+  backendSelect.innerHTML = keys
+    .map((key) => `<option value="${key}">${escapeHtml(BACKENDS[key].label)}</option>`)
+    .join("");
+  backendSelect.value = selectedBackend;
+}
+
+function showBackendSwitchNotice(previousBackend, nextBackend) {
+  const previousLabel = BACKENDS[previousBackend]?.label || previousBackend;
+  const nextLabel = BACKENDS[nextBackend]?.label || nextBackend;
+  sessionStorage.setItem(
+    "qiita-backend-notice",
+    `${previousLabel} Backendが利用できないため、${nextLabel}へ切り替えました。`
+  );
+}
+
 async function checkElasticsearchHealth(healthyKeys) {
   if (!healthyKeys.length) return { ok: false, unavailable: true };
   const candidates = [
@@ -407,7 +496,6 @@ async function renderAllArticles() {
   const data = await api("/api/articles", { page, size });
   const totalPages = Math.max(1, Math.ceil(data.total / size));
   document.title = "全記事一覧 | Qiita Article Search";
-  apiLink.href = apiPath("/api/articles", { page, size });
 
   app.innerHTML = `
     <section class="all-articles-header">
@@ -434,7 +522,6 @@ async function renderHome() {
   const tag = params.get("tag")?.trim() || "";
   const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
   document.title = "Qiita Article Search";
-  apiLink.href = apiPath("/api/search", { q: "Elasticsearch" });
 
   app.innerHTML = `
     <section class="hero">
@@ -445,28 +532,38 @@ async function renderHome() {
     </section>
     ${homeArticleSection(data.results, tag)}
   `;
+  startHomeMonitoring(tag);
 }
 
 async function updateHomeArticles(tag) {
+  if (homeUpdateRunning || location.pathname !== "/") return;
   const section = document.querySelector("#home-articles");
   if (!section) {
     await renderHome();
     return;
   }
 
+  homeUpdateRunning = true;
   section.classList.add("is-updating");
   section.setAttribute("aria-busy", "true");
+  section.querySelector("[data-home-refresh]")?.setAttribute("disabled", "");
   try {
     const data = await api("/api/recent", { size: tag ? 50 : 10, tag });
+    const currentTag = new URLSearchParams(location.search).get("tag")?.trim() || "";
+    if (location.pathname !== "/" || currentTag !== tag) return;
     section.outerHTML = homeArticleSection(data.results, tag);
   } catch (error) {
     section.classList.remove("is-updating");
     section.removeAttribute("aria-busy");
+    section.querySelector("[data-home-refresh]")?.removeAttribute("disabled");
     showNotice(error.message || "記事を取得できませんでした。");
+  } finally {
+    homeUpdateRunning = false;
   }
 }
 
 function homeArticleSection(articles, tag) {
+  const updatedAt = new Date();
   return `
     <section class="section" id="home-articles">
       <div class="section-heading">
@@ -474,7 +571,13 @@ function homeArticleSection(articles, tag) {
           <p class="eyebrow">${tag ? "TAG FILTER" : "RECENTLY UPDATED"}</p>
           <h2>${tag ? `「${escapeHtml(tag)}」の記事` : "最近更新された記事"}</h2>
         </div>
-        <span class="article-count">${articles.length.toLocaleString()} 件</span>
+        <div class="article-list-controls">
+          <span class="article-count">${articles.length.toLocaleString()} 件</span>
+          <time datetime="${updatedAt.toISOString()}">${updatedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新</time>
+          <button type="button" data-home-refresh aria-label="記事一覧を更新">
+            <span aria-hidden="true">↻</span> 更新
+          </button>
+        </div>
       </div>
       ${tag ? `
         <div class="active-filter">
@@ -486,6 +589,16 @@ function homeArticleSection(articles, tag) {
       ${articleGrid(articles, tag)}
     </section>
   `;
+}
+
+function startHomeMonitoring(tag) {
+  homeRefreshTimer = window.setInterval(() => updateHomeArticles(tag), HOME_REFRESH_INTERVAL);
+}
+
+function stopHomeMonitoring() {
+  window.clearInterval(homeRefreshTimer);
+  homeRefreshTimer = undefined;
+  homeUpdateRunning = false;
 }
 
 async function renderSearch() {
@@ -503,7 +616,6 @@ async function renderSearch() {
   const data = await api("/api/search", { q, page, size });
   const totalPages = Math.max(1, Math.ceil(data.total / size));
   document.title = `「${q}」の検索結果 | Qiita Article Search`;
-  apiLink.href = apiPath("/api/search", { q, page, size });
 
   app.innerHTML = `
     <section class="search-header">${searchForm(q, size)}</section>
@@ -526,7 +638,6 @@ async function renderSearch() {
 async function renderDetail(articleId) {
   const article = await api(`/api/articles/${encodeURIComponent(articleId)}`);
   document.title = `${article.title || "無題の記事"} | Qiita Article Search`;
-  apiLink.href = apiPath(`/api/articles/${encodeURIComponent(articleId)}`);
 
   const source = removeDangerousBlocks(article.body || "本文がありません。");
   const markdownHtml = DOMPurify.sanitize(marked.parse(source), {
@@ -798,7 +909,7 @@ function secureArticleLinks() {
 }
 
 async function api(path, params = {}) {
-  const response = await fetch(apiPath(path, params));
+  const response = await fetch(apiPath(path, params), { cache: "no-store" });
   let payload;
   try {
     payload = await response.json();
@@ -824,6 +935,25 @@ function healthPath(key, suffix = "") {
 
 function renderError(message) {
   app.innerHTML = `<section class="error-page"><p class="error-code">APPLICATION ERROR</p><h1>画面を表示できませんでした</h1><p>${escapeHtml(message)}</p><a class="button-secondary" href="/" data-route>トップページへ戻る</a></section>`;
+  app.dataset.ready = "true";
+}
+
+function renderBackendUnavailable() {
+  document.title = "Backend停止中 | Qiita Article Search";
+  app.innerHTML = `
+    <section class="error-page">
+      <p class="error-code">BACKEND UNAVAILABLE</p>
+      <h1>利用できるBackendがありません</h1>
+      <p>${backendAvailabilityKnown ? "稼働状態を15秒ごとに確認しています。Backendが復旧すると自動的に表示を戻します。" : "Backendの稼働状態を確認しています。"}</p>
+    </section>`;
+  app.dataset.ready = "true";
+}
+
+function showPendingBackendNotice() {
+  const message = sessionStorage.getItem("qiita-backend-notice");
+  if (!message) return;
+  sessionStorage.removeItem("qiita-backend-notice");
+  showNotice(message);
 }
 
 function showNotice(message) {
