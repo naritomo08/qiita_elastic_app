@@ -4,13 +4,18 @@ import os
 import socket
 import socketserver
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 
 DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "qiita_elastic_app")
 PORT = int(os.getenv("PORT", "8090"))
+JST = timezone(timedelta(hours=9))
+LOG_TAIL_DEFAULT = 200
+LOG_TAIL_MAX = 1000
+LOG_FULL_DAY_MAX = 20000
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -28,6 +33,16 @@ def docker_get(path):
         if response.status != 200:
             raise RuntimeError(f"Docker API returned {response.status}")
         return json.loads(body)
+    finally:
+        connection.close()
+
+
+def docker_get_raw(path):
+    connection = UnixHTTPConnection("localhost", timeout=4)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        return response.status, response.read()
     finally:
         connection.close()
 
@@ -91,19 +106,105 @@ def project_metrics():
     return sorted(results, key=lambda item: item["service"])
 
 
+def find_container(service):
+    filters = quote(
+        json.dumps({
+            "label": [
+                f"com.docker.compose.project={PROJECT_NAME}",
+                f"com.docker.compose.service={service}",
+            ]
+        }),
+        safe="",
+    )
+    containers = docker_get(f"/containers/json?all=true&filters={filters}")
+    return containers[0] if containers else None
+
+
+def demux_docker_log_stream(data):
+    """Split a Docker logs API response into lines, stripping the 8-byte frame header
+    Docker prepends to each chunk when the container has no TTY attached."""
+    lines = []
+    offset = 0
+    while offset + 8 <= len(data):
+        size = int.from_bytes(data[offset + 4:offset + 8], "big")
+        chunk_start = offset + 8
+        chunk_end = chunk_start + size
+        lines.extend(data[chunk_start:chunk_end].decode("utf-8", errors="replace").splitlines())
+        offset = chunk_end
+    return lines
+
+
+def start_of_today_jst_epoch():
+    """Unix timestamp for the most recent midnight in JST (UTC+9, no DST)."""
+    now_jst = datetime.now(JST)
+    start_jst = now_jst.replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(start_jst.timestamp())
+
+
+def container_logs(service, tail, since):
+    container = find_container(service)
+    if container is None:
+        raise RuntimeError(f"container not found for service: {service}")
+    status, body = docker_get_raw(
+        f"/containers/{quote(container['Id'])}/logs"
+        f"?stdout=1&stderr=1&timestamps=1&tail={tail}&since={since}"
+    )
+    if status != 200:
+        raise RuntimeError(f"Docker API returned {status}")
+    return demux_docker_log_stream(body)
+
+
+def parse_tail(value):
+    if value is None or not value.isdigit():
+        return LOG_TAIL_DEFAULT
+    return min(int(value), LOG_TAIL_MAX)
+
+
+def parse_access_log_entry(line):
+    """Strip the Docker `timestamps=1` prefix and decode the JSON access_log entry."""
+    separator = line.find(" ")
+    json_part = line[separator + 1:] if separator != -1 else line
+    try:
+        return json.loads(json_part)
+    except ValueError:
+        return None
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
             self.send_json(200, {"status": "ok"})
             return
-        if self.path != "/metrics":
-            self.send_json(404, {"error": "not found"})
+        if parsed.path == "/metrics":
+            self.handle_metrics()
             return
+        if parsed.path == "/logs":
+            self.handle_logs(parse_qs(parsed.query))
+            return
+        self.send_json(404, {"error": "not found"})
+
+    def handle_metrics(self):
         try:
             self.send_json(
                 200,
                 {"status": "ok", "project": PROJECT_NAME, "containers": project_metrics()},
             )
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+            self.send_json(503, {"status": "error", "error": str(error)})
+
+    def handle_logs(self, query):
+        service = (query.get("service") or [""])[0].strip()
+        if not service:
+            self.send_json(400, {"error": "service is required"})
+            return
+        full = (query.get("full") or [""])[0] == "1"
+        tail = LOG_FULL_DAY_MAX if full else parse_tail((query.get("tail") or [None])[0])
+        since = start_of_today_jst_epoch()
+        try:
+            lines = container_logs(service, tail, since)
+            logs = [entry for entry in map(parse_access_log_entry, lines) if entry is not None]
+            self.send_json(200, {"status": "ok", "service": service, "logs": logs})
         except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
             self.send_json(503, {"status": "error", "error": str(error)})
 

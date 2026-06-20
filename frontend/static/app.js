@@ -57,6 +57,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const accessLogDownloadButton = event.target.closest("[data-access-log-download]");
+  if (accessLogDownloadButton) {
+    await downloadAccessLogCsv(accessLogDownloadButton);
+    return;
+  }
+
   const link = event.target.closest("a[data-route]");
   if (!link || link.origin !== location.origin) return;
   event.preventDefault();
@@ -187,6 +193,19 @@ async function renderHealthDashboard() {
           </article>
         </div>
       </section>
+      <section class="health-section">
+        <div class="health-section-heading">
+          <div>
+            <p class="eyebrow">OBSERVABILITY</p>
+            <h2>アクセスログ</h2>
+          </div>
+          <div class="health-section-actions">
+            <span>Nginx access_log・本日分(0:00にリセット)</span>
+            <button class="button-secondary" type="button" data-access-log-download>本日分をCSVダウンロード</button>
+          </div>
+        </div>
+        <pre class="access-log" data-access-log>取得中…</pre>
+      </section>
     </section>
   `;
 
@@ -238,9 +257,10 @@ async function updateHealthDashboard() {
   refreshButton?.setAttribute("disabled", "");
 
   try {
-    const [results, containerMetrics] = await Promise.all([
+    const [results, containerMetrics, accessLogs] = await Promise.all([
       Promise.all(Object.keys(BACKENDS).map(async (key) => [key, await checkBackendHealth(key)])),
       checkContainerMetrics(),
+      checkAccessLogs(),
     ]);
     if (requestId !== healthRequestId || location.pathname !== "/health") return;
 
@@ -252,6 +272,7 @@ async function updateHealthDashboard() {
       );
     });
     updateFrontendHealthCard(containerMetrics.get("frontend"), containerMetrics.available);
+    updateAccessLogCard(accessLogs);
     const healthyKeys = results.filter(([, result]) => result.ok).map(([key]) => key);
     const elasticsearch = await checkElasticsearchHealth(healthyKeys);
     if (requestId !== healthRequestId || location.pathname !== "/health") return;
@@ -280,6 +301,107 @@ async function checkContainerMetrics() {
     metrics.available = false;
     return metrics;
   }
+}
+
+async function checkAccessLogs() {
+  try {
+    const response = await fetchWithTimeout("/api/access-logs?tail=100", 8000);
+    const payload = await response.json();
+    if (!response.ok || payload.status !== "ok") throw new Error();
+    return { ok: true, logs: payload.logs };
+  } catch {
+    return { ok: false, logs: [] };
+  }
+}
+
+function updateAccessLogCard(result) {
+  const box = document.querySelector("[data-access-log]");
+  if (!box) return;
+  if (!result.ok) {
+    box.textContent = "ログを取得できませんでした。";
+    return;
+  }
+  if (!result.logs.length) {
+    box.textContent = "アクセスログはまだありません。";
+    return;
+  }
+  box.textContent = result.logs.map(formatAccessLogEntry).join("\n");
+  box.scrollTop = box.scrollHeight;
+}
+
+const JST_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+function formatJst(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  const parts = Object.fromEntries(JST_FORMATTER.formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} JST`;
+}
+
+function formatAccessLogEntry(entry) {
+  const time = formatJst(entry.time);
+  return `${time}  ${entry.remote_addr}  ${entry.status}  ${entry.method} ${entry.uri}  (${entry.request_time}s)`;
+}
+
+const ACCESS_LOG_CSV_COLUMNS = [
+  ["時刻", (entry) => formatJst(entry.time)],
+  ["アクセス元IP", (entry) => entry.remote_addr ?? ""],
+  ["メソッド", (entry) => entry.method ?? ""],
+  ["URI", (entry) => entry.uri ?? ""],
+  ["ステータス", (entry) => entry.status ?? ""],
+  ["送信バイト数", (entry) => entry.body_bytes_sent ?? ""],
+  ["応答時間(秒)", (entry) => entry.request_time ?? ""],
+  ["振り先", (entry) => entry.upstream_addr ?? ""],
+  ["User-Agent", (entry) => entry.user_agent ?? ""],
+];
+
+async function downloadAccessLogCsv(button) {
+  button?.setAttribute("disabled", "");
+  try {
+    const response = await fetchWithTimeout("/api/access-logs?full=1", 20000);
+    const payload = await response.json();
+    if (!response.ok || payload.status !== "ok") throw new Error();
+
+    const entries = payload.logs;
+    if (!entries.length) {
+      showNotice("ダウンロードできるアクセスログがありません。");
+      return;
+    }
+    const header = ACCESS_LOG_CSV_COLUMNS.map(([name]) => csvEscape(name)).join(",");
+    const rows = entries.map((entry) =>
+      ACCESS_LOG_CSV_COLUMNS.map(([, getValue]) => csvEscape(getValue(entry))).join(",")
+    );
+    const csv = `﻿${[header, ...rows].join("\r\n")}\r\n`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `access-log-${csvFileTimestamp()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    showNotice("アクセスログの取得に失敗しました。");
+  } finally {
+    button?.removeAttribute("disabled");
+  }
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function csvFileTimestamp() {
+  const parts = Object.fromEntries(JST_FORMATTER.formatToParts(new Date()).map((part) => [part.type, part.value]));
+  return `${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
 }
 
 async function checkBackendHealth(key) {
