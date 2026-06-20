@@ -175,6 +175,11 @@ services:
         condition: service_healthy
       backend_ruby:
         condition: service_healthy
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "tcp://127.0.0.1:514"
+        tag: "nginx-access"
     restart: unless-stopped
 
   loadtest:
