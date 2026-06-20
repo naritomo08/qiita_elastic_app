@@ -29,9 +29,6 @@ services:
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
-      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
-      BACKEND_PORT: ${BACKEND_PORT:-5020}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
     expose:
       - "5020"
     healthcheck:
@@ -56,8 +53,6 @@ services:
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
-      BACKEND_PORT: 5021
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
     expose:
       - "5021"
     healthcheck:
@@ -84,9 +79,6 @@ services:
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
-      BACKEND_HOST: 0.0.0.0
-      BACKEND_PORT: 5022
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
     expose:
       - "5022"
     healthcheck:
@@ -107,9 +99,6 @@ services:
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
-      BACKEND_HOST: 0.0.0.0
-      BACKEND_PORT: 5023
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
     expose:
       - "5023"
     healthcheck:
@@ -130,9 +119,6 @@ services:
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
-      BACKEND_HOST: 0.0.0.0
-      BACKEND_PORT: 5024
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
     expose:
       - "5024"
     healthcheck:
@@ -153,9 +139,6 @@ services:
     environment:
       ES_URL: ${ES_URL:-http://elastic1:9200}
       ES_INDEX: ${ES_INDEX:-qiita-articles}
-      BACKEND_HOST: 0.0.0.0
-      BACKEND_PORT: 5025
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8082,http://127.0.0.1:8082}
     expose:
       - "5025"
     healthcheck:

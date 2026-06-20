@@ -5,7 +5,6 @@ defmodule QiitaSearchBackend.Router do
   alias QiitaSearchBackend.LinkPreview
 
   plug :match
-  plug :cors
   plug Plug.Parsers, parsers: [:urlencoded, :json], json_decoder: Jason
   plug :dispatch
 
@@ -70,39 +69,8 @@ defmodule QiitaSearchBackend.Router do
     end
   end
 
-  options _ do
-    send_resp(conn, 204, "")
-  end
-
   match _ do
     json(conn, 404, %{"error" => "Not found"})
-  end
-
-  defp cors(conn, _opts) do
-    allowed =
-      System.get_env(
-        "CORS_ORIGINS",
-        "http://localhost:8082,http://127.0.0.1:8082"
-      )
-      |> String.split(",", trim: true)
-      |> Enum.map(&String.trim/1)
-
-    origin = get_req_header(conn, "origin") |> List.first()
-
-    conn
-    |> maybe_put_origin(origin, allowed)
-    |> put_resp_header("access-control-allow-methods", "GET, OPTIONS")
-    |> put_resp_header("access-control-allow-headers", "Content-Type")
-  end
-
-  defp maybe_put_origin(conn, origin, allowed) do
-    if origin && origin in allowed do
-      conn
-      |> put_resp_header("access-control-allow-origin", origin)
-      |> put_resp_header("vary", "Origin")
-    else
-      conn
-    end
   end
 
   defp positive_int(value, default, max \\ nil) do

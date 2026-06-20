@@ -21,19 +21,9 @@ class Backend
   def initialize
     @es_url = ENV.fetch("ES_URL", "http://elastic1:9200").sub(%r{/$}, "")
     @index = ENV.fetch("ES_INDEX", "qiita-articles")
-    @allowed_origins = ENV.fetch(
-      "CORS_ORIGINS",
-      "http://localhost:8082,http://127.0.0.1:8082"
-    ).split(",").map(&:strip)
   end
 
   def call(request, response)
-    add_cors(request, response)
-    if request.request_method == "OPTIONS"
-      response.status = 204
-      return
-    end
-
     payload, status = route(request)
     json(response, status, payload)
   rescue ApiError => error
@@ -308,16 +298,6 @@ class Backend
     ""
   end
 
-  def add_cors(request, response)
-    origin = request["Origin"]
-    if origin && @allowed_origins.include?(origin)
-      response["Access-Control-Allow-Origin"] = origin
-      response["Vary"] = "Origin"
-    end
-    response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    response["Access-Control-Allow-Headers"] = "Content-Type"
-  end
-
   def json(response, status, payload)
     response.status = status
     response["Content-Type"] = "application/json; charset=utf-8"
@@ -349,8 +329,8 @@ end
 
 backend = Backend.new
 server = WEBrick::HTTPServer.new(
-  Port: ENV.fetch("BACKEND_PORT", "5025").to_i,
-  BindAddress: ENV.fetch("BACKEND_HOST", "0.0.0.0"),
+  Port: 5025,
+  BindAddress: "0.0.0.0",
   AccessLog: [],
   Logger: WEBrick::Log.new($stderr, WEBrick::Log::INFO)
 )

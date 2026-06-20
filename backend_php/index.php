@@ -21,24 +21,6 @@ function positive_int(?string $value, int $default, ?int $maximum = null): int {
     return $maximum === null ? $number : min($number, $maximum);
 }
 
-function cors(): void {
-    $allowed = array_map('trim', explode(',', env_value(
-        'CORS_ORIGINS',
-        'http://localhost:8082,http://127.0.0.1:8082'
-    )));
-    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-    if ($origin !== '' && in_array($origin, $allowed, true)) {
-        header("Access-Control-Allow-Origin: $origin");
-        header('Vary: Origin');
-    }
-    header('Access-Control-Allow-Methods: GET, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-        http_response_code(204);
-        exit;
-    }
-}
-
 function http_json(string $method, string $url, ?array $payload = null): array {
     $headers = ['Content-Type: application/json'];
     $options = [
@@ -222,7 +204,6 @@ function link_preview(string $target): never {
     json_response(502, ['error' => 'リンク先の情報を取得できませんでした。']);
 }
 
-cors();
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
 
 if ($path === '/health') {

@@ -45,15 +45,6 @@ class BackendTestCase(unittest.TestCase):
     def test_health(self):
         self.assertEqual(self.client.get("/health").status_code, 200)
 
-    def test_cors_for_frontend(self):
-        response = self.client.get(
-            "/health", headers={"Origin": "http://localhost:8082"}
-        )
-        self.assertEqual(
-            response.headers.get("Access-Control-Allow-Origin"),
-            "http://localhost:8082",
-        )
-
     def test_recent_api_with_tag(self):
         response = self.client.get("/api/recent?tag=Python&size=50")
         self.assertEqual(response.status_code, 200)

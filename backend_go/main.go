@@ -31,27 +31,20 @@ type apiError struct {
 func (e *apiError) Error() string { return e.Message }
 
 type server struct {
-	esURL         string
-	index         string
-	allowedOrigin map[string]bool
+	esURL string
+	index string
 }
 
 func main() {
 	s := newServer()
-	port := env("BACKEND_PORT", "5024")
-	log.Printf("Go backend listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, s.routes()))
+	log.Printf("Go backend listening on :5024")
+	log.Fatal(http.ListenAndServe(":5024", s.routes()))
 }
 
 func newServer() *server {
-	origins := map[string]bool{}
-	for _, origin := range strings.Split(env("CORS_ORIGINS", "http://localhost:8082,http://127.0.0.1:8082"), ",") {
-		origins[strings.TrimSpace(origin)] = true
-	}
 	return &server{
-		esURL:         strings.TrimRight(env("ES_URL", "http://elastic1:9200"), "/"),
-		index:         env("ES_INDEX", "qiita-articles"),
-		allowedOrigin: origins,
+		esURL: strings.TrimRight(env("ES_URL", "http://elastic1:9200"), "/"),
+		index: env("ES_INDEX", "qiita-articles"),
 	}
 }
 
@@ -64,23 +57,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/api/articles/", s.article)
 	mux.HandleFunc("/api/articles", s.articles)
 	mux.HandleFunc("/api/link-preview", s.linkPreview)
-	return s.cors(mux)
-}
-
-func (s *server) cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); s.allowedOrigin[origin] {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return mux
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

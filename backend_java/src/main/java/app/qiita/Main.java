@@ -17,12 +17,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,10 +29,6 @@ public final class Main {
     private static final int MAX_PREVIEW_BYTES = 1_000_000;
     private final String esUrl = env("ES_URL", "http://elastic1:9200").replaceAll("/+$", "");
     private final String index = env("ES_INDEX", "qiita-articles");
-    private final Set<String> allowedOrigins = Set.copyOf(Arrays.stream(env(
-        "CORS_ORIGINS",
-        "http://localhost:8082,http://127.0.0.1:8082"
-    ).split(",")).map(String::trim).toList());
     private final HttpClient esClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(3))
         .build();
@@ -44,8 +38,8 @@ public final class Main {
     }
 
     private void start() throws IOException {
-        int port = Integer.parseInt(env("BACKEND_PORT", "5023"));
-        HttpServer server = HttpServer.create(new InetSocketAddress(env("BACKEND_HOST", "0.0.0.0"), port), 0);
+        int port = 5023;
+        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.createContext("/", this::handle);
         server.setExecutor(null);
         server.start();
@@ -54,11 +48,6 @@ public final class Main {
 
     private void handle(HttpExchange exchange) throws IOException {
         try {
-            addCors(exchange);
-            if ("OPTIONS".equals(exchange.getRequestMethod())) {
-                exchange.sendResponseHeaders(204, -1);
-                return;
-            }
             String path = exchange.getRequestURI().getPath();
             Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
             if (path.equals("/health")) {
@@ -422,16 +411,6 @@ public final class Main {
     private static String truncate(String value, int maximum) {
         int count = value.codePointCount(0, value.length());
         return count <= maximum ? value : value.substring(0, value.offsetByCodePoints(0, maximum));
-    }
-
-    private void addCors(HttpExchange exchange) {
-        String origin = exchange.getRequestHeaders().getFirst("Origin");
-        if (origin != null && allowedOrigins.contains(origin)) {
-            exchange.getResponseHeaders().set("Access-Control-Allow-Origin", origin);
-            exchange.getResponseHeaders().set("Vary", "Origin");
-        }
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, OPTIONS");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
     }
 
     private static void respond(HttpExchange exchange, int status, Object payload) throws IOException {

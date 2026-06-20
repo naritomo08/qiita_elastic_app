@@ -11,10 +11,9 @@ func TestHealthAndValidation(t *testing.T) {
 	handler := s.routes()
 
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
-	request.Header.Set("Origin", "http://localhost:8082")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != 200 || response.Header().Get("Access-Control-Allow-Origin") == "" {
+	if response.Code != 200 {
 		t.Fatalf("unexpected health response: %d", response.Code)
 	}
 

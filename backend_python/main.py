@@ -17,14 +17,6 @@ from .link_preview import get_link_preview
 
 app = Flask(__name__)
 repository = QiitaArticleRepository()
-allowed_origins = {
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ORIGINS",
-        "http://localhost:8082,http://127.0.0.1:8082",
-    ).split(",")
-    if origin.strip()
-}
 
 
 def parse_positive_int(
@@ -37,17 +29,6 @@ def parse_positive_int(
     if parsed < minimum:
         return minimum
     return min(parsed, maximum) if maximum is not None else parsed
-
-
-@app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get("Origin")
-    if origin in allowed_origins:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
-    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    return response
 
 
 @app.get("/health")
@@ -169,7 +150,4 @@ def _status_for_error(error: ElasticsearchServiceError) -> int:
 
 
 if __name__ == "__main__":
-    app.run(
-        host=os.getenv("BACKEND_HOST", "0.0.0.0"),
-        port=parse_positive_int(os.getenv("BACKEND_PORT"), 5020),
-    )
+    app.run(host="0.0.0.0", port=5020)

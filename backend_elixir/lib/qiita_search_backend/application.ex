@@ -3,15 +3,11 @@ defmodule QiitaSearchBackend.Application do
 
   @impl true
   def start(_type, _args) do
-    port =
-      System.get_env("BACKEND_PORT", "5021")
-      |> String.to_integer()
-
     children = [
       {Plug.Cowboy,
        scheme: :http,
        plug: QiitaSearchBackend.Router,
-       options: [ip: {0, 0, 0, 0}, port: port]}
+       options: [ip: {0, 0, 0, 0}, port: 5021]}
     ]
 
     Supervisor.start_link(children,

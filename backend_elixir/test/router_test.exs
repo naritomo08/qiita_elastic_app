@@ -22,13 +22,4 @@ defmodule QiitaSearchBackend.RouterTest do
 
     assert conn.status == 400
   end
-
-  test "frontend origin is allowed" do
-    conn =
-      conn(:get, "/health")
-      |> put_req_header("origin", "http://localhost:8082")
-      |> Router.call([])
-
-    assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:8082"]
-  end
 end
