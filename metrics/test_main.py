@@ -1,17 +1,21 @@
 import unittest
 from datetime import datetime, timedelta
 
-from config import JST, LOG_TAIL_DEFAULT, LOG_TAIL_MAX
-from logs import (
+from main import (
+    JST,
+    LOG_TAIL_DEFAULT,
+    LOG_TAIL_MAX,
+    container_display_name,
+    cpu_percent,
     day_bounds_jst,
     demux_docker_log_stream,
     enrich_log_entry,
+    memory_values,
     parse_access_log_entry,
     parse_date_param,
     parse_tail,
     today_jst_date,
 )
-from metrics import container_display_name, cpu_percent, memory_values
 
 
 class MetricsTest(unittest.TestCase):
