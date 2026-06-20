@@ -212,6 +212,15 @@ def parse_access_log_entry(line):
         return None
 
 
+def timestamp_to_jst_date(timestamp):
+    """Convert an ISO8601 `time` value (nginx logs it in UTC) to its JST calendar
+    date, so `dt` lines up with the JST day boundaries used by day_bounds_jst."""
+    try:
+        return datetime.fromisoformat(timestamp).astimezone(JST).date().isoformat()
+    except ValueError:
+        return timestamp[:10]
+
+
 def enrich_log_entry(entry, service, host, container):
     """Reshape a raw access_json entry into a self-contained document suitable for
     direct Elasticsearch/Iceberg ingestion: `time` becomes `@timestamp`, and a `dt`
@@ -219,7 +228,7 @@ def enrich_log_entry(entry, service, host, container):
     timestamp = entry.get("time")
     enriched = {
         "@timestamp": timestamp,
-        "dt": timestamp[:10] if timestamp else None,
+        "dt": timestamp_to_jst_date(timestamp) if timestamp else None,
         "service": service,
         "host": host,
         "container": container,

@@ -141,6 +141,11 @@ class MetricsTest(unittest.TestCase):
         self.assertIsNone(enriched["@timestamp"])
         self.assertIsNone(enriched["dt"])
 
+    def test_enrich_log_entry_dt_uses_jst_date_not_utc_date(self):
+        entry = {"time": "2026-06-20T16:02:20+00:00"}
+        enriched = enrich_log_entry(entry, "frontend", "elastic1", "frontend")
+        self.assertEqual(enriched["dt"], "2026-06-21")
+
 
 if __name__ == "__main__":
     unittest.main()
