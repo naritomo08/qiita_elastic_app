@@ -12,10 +12,25 @@ from urllib.parse import parse_qs, quote, urlparse
 DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "qiita_elastic_app")
 PORT = int(os.getenv("PORT", "8090"))
+HOST_HOSTNAME_FILE = os.getenv("HOST_HOSTNAME_FILE", "/host/etc-hostname")
 JST = timezone(timedelta(hours=9))
 LOG_TAIL_DEFAULT = 200
 LOG_TAIL_MAX = 1000
 LOG_FULL_DAY_MAX = 20000
+
+
+def read_host_hostname():
+    """Resolve the Docker *host* machine's hostname (not the container's own),
+    by reading the host's /etc/hostname bind-mounted read-only into the container.
+    Falls back to the container hostname when the file isn't mounted (e.g. local dev)."""
+    try:
+        with open(HOST_HOSTNAME_FILE, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return socket.gethostname()
+
+
+HOST_HOSTNAME = read_host_hostname()
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -75,15 +90,19 @@ def memory_values(stats):
     return usage, limit, percent
 
 
+def container_display_name(container):
+    names = container.get("Names") or []
+    return names[0].lstrip("/") if names else container["Id"][:12]
+
+
 def container_metrics(container):
     container_id = container["Id"]
     stats = docker_get(f"/containers/{quote(container_id)}/stats?stream=false")
     usage, limit, memory_percent = memory_values(stats)
     labels = container.get("Labels") or {}
-    names = container.get("Names") or []
     return {
         "id": container_id[:12],
-        "name": names[0].lstrip("/") if names else container_id[:12],
+        "name": container_display_name(container),
         "service": labels.get("com.docker.compose.service", ""),
         "state": container.get("State", ""),
         "status": container.get("Status", ""),
@@ -141,6 +160,11 @@ def start_of_today_jst_epoch():
     return int(start_jst.timestamp())
 
 
+def today_jst_date():
+    """Date partition key (YYYY-MM-DD) for the current day in JST."""
+    return datetime.now(JST).date().isoformat()
+
+
 def container_logs(service, tail, since):
     container = find_container(service)
     if container is None:
@@ -151,7 +175,7 @@ def container_logs(service, tail, since):
     )
     if status != 200:
         raise RuntimeError(f"Docker API returned {status}")
-    return demux_docker_log_stream(body)
+    return container, demux_docker_log_stream(body)
 
 
 def parse_tail(value):
@@ -168,6 +192,22 @@ def parse_access_log_entry(line):
         return json.loads(json_part)
     except ValueError:
         return None
+
+
+def enrich_log_entry(entry, service, host, container):
+    """Reshape a raw access_json entry into a self-contained document suitable for
+    direct Elasticsearch/Iceberg ingestion: `time` becomes `@timestamp`, and a `dt`
+    date-partition key plus service/host/container metadata are attached."""
+    timestamp = entry.get("time")
+    enriched = {
+        "@timestamp": timestamp,
+        "dt": timestamp[:10] if timestamp else None,
+        "service": service,
+        "host": host,
+        "container": container,
+    }
+    enriched.update((key, value) for key, value in entry.items() if key != "time")
+    return enriched
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -202,9 +242,25 @@ class Handler(BaseHTTPRequestHandler):
         tail = LOG_FULL_DAY_MAX if full else parse_tail((query.get("tail") or [None])[0])
         since = start_of_today_jst_epoch()
         try:
-            lines = container_logs(service, tail, since)
-            logs = [entry for entry in map(parse_access_log_entry, lines) if entry is not None]
-            self.send_json(200, {"status": "ok", "service": service, "logs": logs})
+            container, lines = container_logs(service, tail, since)
+            container_name = container_display_name(container)
+            logs = [
+                enrich_log_entry(entry, service, HOST_HOSTNAME, container_name)
+                for entry in map(parse_access_log_entry, lines)
+                if entry is not None
+            ]
+            self.send_json(
+                200,
+                {
+                    "status": "ok",
+                    "service": service,
+                    "host": HOST_HOSTNAME,
+                    "container": container_name,
+                    "date": today_jst_date(),
+                    "count": len(logs),
+                    "logs": logs,
+                },
+            )
         except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
             self.send_json(503, {"status": "error", "error": str(error)})
 

@@ -348,12 +348,12 @@ function formatJst(value) {
 }
 
 function formatAccessLogEntry(entry) {
-  const time = formatJst(entry.time);
+  const time = formatJst(entry["@timestamp"]);
   return `${time}  ${entry.remote_addr}  ${entry.status}  ${entry.method} ${entry.uri}  (${entry.request_time}s)`;
 }
 
 const ACCESS_LOG_CSV_COLUMNS = [
-  ["時刻", (entry) => formatJst(entry.time)],
+  ["時刻", (entry) => formatJst(entry["@timestamp"])],
   ["アクセス元IP", (entry) => entry.remote_addr ?? ""],
   ["メソッド", (entry) => entry.method ?? ""],
   ["URI", (entry) => entry.uri ?? ""],

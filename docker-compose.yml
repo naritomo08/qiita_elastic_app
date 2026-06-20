@@ -7,8 +7,10 @@ services:
     environment:
       PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-qiita_elastic_app}
       PORT: 8090
+      HOST_HOSTNAME_FILE: /host/etc-hostname
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ${HOST_HOSTNAME_PATH:-/etc/hostname}:/host/etc-hostname:ro
     healthcheck:
       test:
         - CMD
