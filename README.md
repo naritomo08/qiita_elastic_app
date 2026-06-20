@@ -150,6 +150,7 @@ Docker Compose内の各バックエンドへ転送します。各バックエン
 ## 起動
 
 ```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 
