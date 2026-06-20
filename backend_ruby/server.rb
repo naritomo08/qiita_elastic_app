@@ -329,7 +329,7 @@ end
 
 backend = Backend.new
 server = WEBrick::HTTPServer.new(
-  Port: 5025,
+  Port: 5000,
   BindAddress: "0.0.0.0",
   AccessLog: [],
   Logger: WEBrick::Log.new($stderr, WEBrick::Log::INFO)

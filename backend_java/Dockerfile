@@ -11,5 +11,5 @@ FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=builder /src/target/server.jar /app/server.jar
 
-EXPOSE 5023
+EXPOSE 5000
 CMD ["java", "-jar", "/app/server.jar"]

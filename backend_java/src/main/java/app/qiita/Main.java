@@ -38,7 +38,7 @@ public final class Main {
     }
 
     private void start() throws IOException {
-        int port = 5023;
+        int port = 5000;
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.createContext("/", this::handle);
         server.setExecutor(null);

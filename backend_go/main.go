@@ -37,8 +37,8 @@ type server struct {
 
 func main() {
 	s := newServer()
-	log.Printf("Go backend listening on :5024")
-	log.Fatal(http.ListenAndServe(":5024", s.routes()))
+	log.Printf("Go backend listening on :5000")
+	log.Fatal(http.ListenAndServe(":5000", s.routes()))
 }
 
 func newServer() *server {

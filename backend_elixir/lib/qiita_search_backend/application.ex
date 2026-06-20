@@ -7,7 +7,7 @@ defmodule QiitaSearchBackend.Application do
       {Plug.Cowboy,
        scheme: :http,
        plug: QiitaSearchBackend.Router,
-       options: [ip: {0, 0, 0, 0}, port: 5021]}
+       options: [ip: {0, 0, 0, 0}, port: 5000]}
     ]
 
     Supervisor.start_link(children,

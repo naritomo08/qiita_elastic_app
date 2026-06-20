@@ -5,5 +5,5 @@ WORKDIR /app
 COPY backend_ruby/server.rb .
 RUN ruby -c server.rb
 
-EXPOSE 5025
+EXPOSE 5000
 CMD ["ruby", "server.rb"]

@@ -10,5 +10,5 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /out/server /usr/local/bin/server
 
-EXPOSE 5024
+EXPOSE 5000
 CMD ["server"]

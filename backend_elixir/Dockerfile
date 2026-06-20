@@ -26,6 +26,6 @@ WORKDIR /app
 COPY --from=build /app/_build/prod/rel/qiita_search_backend ./
 
 ENV HOME=/app
-EXPOSE 5021
+EXPOSE 5000
 
 CMD ["bin/qiita_search_backend", "start"]
