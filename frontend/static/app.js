@@ -200,8 +200,8 @@ async function renderHealthDashboard() {
             <h2>アクセスログ</h2>
           </div>
           <div class="health-section-actions">
-            <span>Nginx access_log・本日分(0:00にリセット)</span>
-            <button class="button-secondary" type="button" data-access-log-download>本日分をCSVダウンロード</button>
+            <span>画面は本日分の最新100件のみ表示（CSVは本日分の全件）</span>
+            <button class="button-secondary" type="button" data-access-log-download>本日分の全件をCSVダウンロード</button>
           </div>
         </div>
         <pre class="access-log" data-access-log>取得中…</pre>
