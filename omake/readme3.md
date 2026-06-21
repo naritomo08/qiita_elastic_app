@@ -127,26 +127,32 @@ ES_URL="${ES_URL:-http://elastic1:9200}"
 DATA_STREAM="${DATA_STREAM:-logs-access-iceberg}"
 
 SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
+HDFS="${HDFS:-sudo -u spark hdfs dfs}"
+
 CATALOG="${CATALOG:-hive_prod}"
 DB="${DB:-logs}"
 TABLE="${TABLE:-nginx_access_curated}"
 
 TARGET_DT="${1:-$(date -d 'yesterday' +%F)}"
+NEXT_DT="$(date -d "${TARGET_DT} +1 day" +%F)"
 
-WORK_DIR="${WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
-JSON_DIR="${WORK_DIR}/json"
-BULK_FILE="${WORK_DIR}/bulk.ndjson"
-SQL_FILE="${WORK_DIR}/export.sql"
-RESP_FILE="${WORK_DIR}/bulk_response.json"
+LOCAL_WORK_DIR="${LOCAL_WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
+HDFS_WORK_DIR="${HDFS_WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
 
-mkdir -p "${WORK_DIR}" "${JSON_DIR}"
+SQL_FILE="${LOCAL_WORK_DIR}/export.sql"
+BULK_FILE="${LOCAL_WORK_DIR}/bulk.ndjson"
+RESP_FILE="${LOCAL_WORK_DIR}/bulk_response.json"
+DELETE_RESP_FILE="${LOCAL_WORK_DIR}/delete_response.json"
+
+mkdir -p "${LOCAL_WORK_DIR}"
 
 log() {
   echo "[$(date '+%F %T')] $*"
 }
 
 cleanup() {
-  rm -rf "${WORK_DIR}"
+  rm -rf "${LOCAL_WORK_DIR}"
+  ${HDFS} -rm -r -f "${HDFS_WORK_DIR}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -156,14 +162,44 @@ if ! [[ "${TARGET_DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
 fi
 
 log "[INFO] TARGET_DT=${TARGET_DT}"
+log "[INFO] NEXT_DT=${NEXT_DT}"
 log "[INFO] DATA_STREAM=${DATA_STREAM}"
 log "[INFO] TABLE=${CATALOG}.${DB}.${TABLE}"
-log "[INFO] WORK_DIR=${WORK_DIR}"
+log "[INFO] LOCAL_WORK_DIR=${LOCAL_WORK_DIR}"
+log "[INFO] HDFS_WORK_DIR=${HDFS_WORK_DIR}"
+
+log "[INFO] delete existing documents from Elasticsearch. dt=${TARGET_DT}"
+
+HTTP_CODE=$(curl -s -o "${DELETE_RESP_FILE}" -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -X POST "${ES_URL}/${DATA_STREAM}/_delete_by_query?conflicts=proceed&refresh=true&wait_for_completion=true" \
+  -d '{
+    "query": {
+      "range": {
+        "dt": {
+          "gte": "'"${TARGET_DT}"'",
+          "lt": "'"${NEXT_DT}"'"
+        }
+      }
+    }
+  }')
+
+if [ "${HTTP_CODE}" != "200" ]; then
+  log "[ERROR] delete_by_query failed. http_code=${HTTP_CODE}"
+  cat "${DELETE_RESP_FILE}"
+  exit 1
+fi
+
+DELETED_COUNT=$(jq -r '.deleted // 0' "${DELETE_RESP_FILE}")
+log "[INFO] deleted existing docs=${DELETED_COUNT}"
+
+${HDFS} -rm -r -f "${HDFS_WORK_DIR}" >/dev/null 2>&1 || true
+${HDFS} -mkdir -p "${HDFS_WORK_DIR}" >/dev/null
 
 cat > "${SQL_FILE}" <<EOSQL
 CREATE OR REPLACE TEMP VIEW accesslog_export AS
 SELECT
-  date_format(event_time, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'") AS \`@timestamp\`,
+  concat(date_format(event_time, "yyyy-MM-dd'T'HH:mm:ss.SSS"), '+09:00') AS \`@timestamp\`,
   CAST(dt AS STRING) AS dt,
   CAST(host AS STRING) AS host,
   CAST(container_name AS STRING) AS container_name,
@@ -180,7 +216,7 @@ SELECT
 FROM ${CATALOG}.${DB}.${TABLE}
 WHERE dt = DATE '${TARGET_DT}';
 
-INSERT OVERWRITE DIRECTORY '${JSON_DIR}'
+INSERT OVERWRITE DIRECTORY '${HDFS_WORK_DIR}/json'
 USING json
 SELECT * FROM accesslog_export;
 EOSQL
@@ -188,14 +224,13 @@ EOSQL
 log "[INFO] export Iceberg to JSONL by Spark"
 ${SPARK_SQL} -f "${SQL_FILE}"
 
-JSON_FILES=$(find "${JSON_DIR}" -type f -name 'part-*' | sort || true)
+log "[INFO] check exported files on HDFS"
+${HDFS} -ls "${HDFS_WORK_DIR}/json" || {
+  log "[ERROR] HDFS json directory not found: ${HDFS_WORK_DIR}/json"
+  exit 1
+}
 
-if [ -z "${JSON_FILES}" ]; then
-  log "[WARN] no JSON files generated"
-  exit 0
-fi
-
-DOC_COUNT=$(cat ${JSON_FILES} | wc -l | awk '{print $1}')
+DOC_COUNT=$(${HDFS} -cat "${HDFS_WORK_DIR}/json/part-*" 2>/dev/null | wc -l | awk '{print $1}')
 
 if [ "${DOC_COUNT}" -eq 0 ]; then
   log "[WARN] no records found. TARGET_DT=${TARGET_DT}"
@@ -206,10 +241,18 @@ log "[INFO] exported docs=${DOC_COUNT}"
 
 : > "${BULK_FILE}"
 
-while IFS= read -r json_line; do
+${HDFS} -cat "${HDFS_WORK_DIR}/json/part-*" | while IFS= read -r json_line; do
   printf '{ "create": { "_index": "%s" } }\n' "${DATA_STREAM}" >> "${BULK_FILE}"
   printf '%s\n' "${json_line}" >> "${BULK_FILE}"
-done < <(cat ${JSON_FILES})
+done
+
+BULK_LINES=$(wc -l < "${BULK_FILE}" | awk '{print $1}')
+log "[INFO] bulk lines=${BULK_LINES}"
+
+if [ "${BULK_LINES}" -eq 0 ]; then
+  log "[ERROR] bulk file is empty"
+  exit 1
+fi
 
 log "[INFO] bulk upload to Elasticsearch"
 
@@ -232,11 +275,27 @@ if [ "${HAS_ERRORS}" != "false" ]; then
   exit 1
 fi
 
-ES_COUNT=$(curl -s "${ES_URL}/${DATA_STREAM}/_count?q=dt:${TARGET_DT}" | jq -r '.count')
+ES_COUNT=$(curl -s "${ES_URL}/${DATA_STREAM}/_count" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "range": {
+        "dt": {
+          "gte": "'"${TARGET_DT}"'",
+          "lt": "'"${NEXT_DT}"'"
+        }
+      }
+    }
+  }' | jq -r '.count')
 
 log "[INFO] bulk completed"
 log "[INFO] source_docs=${DOC_COUNT}"
+log "[INFO] deleted_before_insert=${DELETED_COUNT}"
 log "[INFO] es_count_dt_${TARGET_DT}=${ES_COUNT}"
+
+if [ "${ES_COUNT}" -ne "${DOC_COUNT}" ]; then
+  log "[WARN] count mismatch. source=${DOC_COUNT}, es=${ES_COUNT}"
+fi
 EOF
 
 sudo chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
