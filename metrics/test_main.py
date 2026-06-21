@@ -2,22 +2,20 @@ import unittest
 import tempfile
 from datetime import datetime, timedelta
 
-from main import (
+from access_logs import (
     JST,
     LOG_TAIL_DEFAULT,
     LOG_TAIL_MAX,
-    container_display_name,
-    cpu_percent,
     day_bounds_jst,
-    demux_docker_log_stream,
     enrich_log_entry,
-    memory_values,
     parse_access_log_entry,
     parse_date_param,
     parse_tail,
     persistent_access_logs,
     today_jst_date,
 )
+from container_metrics import container_display_name, cpu_percent, memory_values
+from docker_api import demux_docker_log_stream
 
 
 class MetricsTest(unittest.TestCase):
