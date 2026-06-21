@@ -88,8 +88,10 @@ curl -X PUT "http://elastic1:9200/_index_template/logs-access-iceberg-template" 
         "status": { "type": "integer" },
         "body_bytes_sent": { "type": "long" },
         "request_time": { "type": "double" },
-        "referer": { "type": "keyword" },
-        "user_agent": { "type": "text" }
+        "upstream_addr": { "type": "keyword" },
+        "user_agent": { "type": "text" },
+        "raw_msg": { "type": "text" },
+        "hr": { "type": "integer" }
       }
     }
   }
@@ -117,16 +119,7 @@ curl -s \
 # 4. Spark取り込みシェル作成
 
 ```bash
-sudo mkdir -p /opt/elastic/bin
-```
-
-```bash
-sudo vi /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
-```
-
-以下を配置する。
-
-```bash
+sudo tee /opt/elastic/bin/export_accesslog_iceberg_to_es.sh >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -140,37 +133,50 @@ TABLE="${TABLE:-nginx_access_curated}"
 
 TARGET_DT="${1:-$(date -d 'yesterday' +%F)}"
 
-LOG_DIR="${LOG_DIR:-/tmp}"
 WORK_DIR="${WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
+JSON_DIR="${WORK_DIR}/json"
+BULK_FILE="${WORK_DIR}/bulk.ndjson"
+SQL_FILE="${WORK_DIR}/export.sql"
+RESP_FILE="${WORK_DIR}/bulk_response.json"
 
-mkdir -p "${WORK_DIR}"
+mkdir -p "${WORK_DIR}" "${JSON_DIR}"
 
 log() {
   echo "[$(date '+%F %T')] $*"
 }
 
-JSON_DIR="${WORK_DIR}/json"
-BULK_FILE="${WORK_DIR}/bulk.ndjson"
-SQL_FILE="${WORK_DIR}/export.sql"
+cleanup() {
+  rm -rf "${WORK_DIR}"
+}
+trap cleanup EXIT
 
-mkdir -p "${JSON_DIR}"
+if ! [[ "${TARGET_DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  log "[ERROR] TARGET_DT must be YYYY-MM-DD. input=${TARGET_DT}"
+  exit 1
+fi
+
+log "[INFO] TARGET_DT=${TARGET_DT}"
+log "[INFO] DATA_STREAM=${DATA_STREAM}"
+log "[INFO] TABLE=${CATALOG}.${DB}.${TABLE}"
+log "[INFO] WORK_DIR=${WORK_DIR}"
 
 cat > "${SQL_FILE}" <<EOSQL
 CREATE OR REPLACE TEMP VIEW accesslog_export AS
 SELECT
-  date_format(event_time,
-    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'") AS `@timestamp`,
-  CAST(dt AS STRING) dt,
-  host,
-  container_name,
-  client_ip,
-  method,
-  uri,
-  status,
-  body_bytes_sent,
-  request_time,
-  referer,
-  user_agent
+  date_format(event_time, "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'") AS \`@timestamp\`,
+  CAST(dt AS STRING) AS dt,
+  CAST(host AS STRING) AS host,
+  CAST(container_name AS STRING) AS container_name,
+  CAST(client_ip AS STRING) AS client_ip,
+  CAST(method AS STRING) AS method,
+  CAST(uri AS STRING) AS uri,
+  CAST(status AS INT) AS status,
+  CAST(body_bytes_sent AS BIGINT) AS body_bytes_sent,
+  CAST(request_time AS DOUBLE) AS request_time,
+  CAST(upstream_addr AS STRING) AS upstream_addr,
+  CAST(user_agent AS STRING) AS user_agent,
+  CAST(raw_msg AS STRING) AS raw_msg,
+  CAST(hr AS INT) AS hr
 FROM ${CATALOG}.${DB}.${TABLE}
 WHERE dt = DATE '${TARGET_DT}';
 
@@ -179,33 +185,61 @@ USING json
 SELECT * FROM accesslog_export;
 EOSQL
 
+log "[INFO] export Iceberg to JSONL by Spark"
 ${SPARK_SQL} -f "${SQL_FILE}"
+
+JSON_FILES=$(find "${JSON_DIR}" -type f -name 'part-*' | sort || true)
+
+if [ -z "${JSON_FILES}" ]; then
+  log "[WARN] no JSON files generated"
+  exit 0
+fi
+
+DOC_COUNT=$(cat ${JSON_FILES} | wc -l | awk '{print $1}')
+
+if [ "${DOC_COUNT}" -eq 0 ]; then
+  log "[WARN] no records found. TARGET_DT=${TARGET_DT}"
+  exit 0
+fi
+
+log "[INFO] exported docs=${DOC_COUNT}"
 
 : > "${BULK_FILE}"
 
-find "${JSON_DIR}" -name 'part-*' | while read f
-do
-  while read line
-  do
-    echo '{ "create": { "_index": "'"${DATA_STREAM}"'" } }' \
-      >> "${BULK_FILE}"
-    echo "${line}" >> "${BULK_FILE}"
-  done < "${f}"
-done
+while IFS= read -r json_line; do
+  printf '{ "create": { "_index": "%s" } }\n' "${DATA_STREAM}" >> "${BULK_FILE}"
+  printf '%s\n' "${json_line}" >> "${BULK_FILE}"
+done < <(cat ${JSON_FILES})
 
-curl \
--H "Content-Type: application/x-ndjson" \
--X POST \
-"${ES_URL}/_bulk?refresh=true" \
---data-binary @"${BULK_FILE}"
+log "[INFO] bulk upload to Elasticsearch"
 
-log "[INFO] completed"
-```
+HTTP_CODE=$(curl -s -o "${RESP_FILE}" -w "%{http_code}" \
+  -H "Content-Type: application/x-ndjson" \
+  -X POST "${ES_URL}/_bulk?refresh=true" \
+  --data-binary @"${BULK_FILE}")
 
-権限付与
+if [ "${HTTP_CODE}" != "200" ]; then
+  log "[ERROR] bulk request failed. http_code=${HTTP_CODE}"
+  cat "${RESP_FILE}"
+  exit 1
+fi
 
-```bash
-chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
+HAS_ERRORS=$(jq -r '.errors' "${RESP_FILE}")
+
+if [ "${HAS_ERRORS}" != "false" ]; then
+  log "[ERROR] bulk completed with item errors"
+  jq '.items[] | select(.create.error != null) | .create.error' "${RESP_FILE}" | head -20
+  exit 1
+fi
+
+ES_COUNT=$(curl -s "${ES_URL}/${DATA_STREAM}/_count?q=dt:${TARGET_DT}" | jq -r '.count')
+
+log "[INFO] bulk completed"
+log "[INFO] source_docs=${DOC_COUNT}"
+log "[INFO] es_count_dt_${TARGET_DT}=${ES_COUNT}"
+EOF
+
+sudo chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
 ```
 
 ---
@@ -221,7 +255,7 @@ chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
 任意日
 
 ```bash
-/opt/elastic/bin/export_accesslog_iceberg_to_es.sh 2026-06-20
+/opt/elastic/bin/export_accesslog_iceberg_to_es.sh 2026-06-21
 ```
 
 ---
@@ -233,14 +267,14 @@ Iceberg側
 ```sql
 SELECT count(*)
 FROM hive_prod.logs.nginx_access_curated
-WHERE dt = DATE '2026-06-20';
+WHERE dt = DATE '2026-06-21';
 ```
 
 Elasticsearch側
 
 ```bash
 curl -s \
-"http://elastic1:9200/logs-access-iceberg/_count?q=dt:2026-06-20"
+"http://elastic1:9200/logs-access-iceberg/_count?q=dt:2026-06-21"
 ```
 
 ---
