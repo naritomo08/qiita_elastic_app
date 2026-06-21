@@ -96,4 +96,3 @@ if [ "${ERRORS}" != "false" ]; then
 fi
 
 log "[INFO] import completed."
-EOF

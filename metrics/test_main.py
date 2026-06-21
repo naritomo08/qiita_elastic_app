@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from datetime import datetime, timedelta
 
 from main import (
@@ -14,6 +15,7 @@ from main import (
     parse_access_log_entry,
     parse_date_param,
     parse_tail,
+    persistent_access_logs,
     today_jst_date,
 )
 
@@ -95,6 +97,40 @@ class MetricsTest(unittest.TestCase):
 
     def test_parse_access_log_entry_returns_none_for_invalid_json(self):
         self.assertIsNone(parse_access_log_entry("not json at all"))
+
+    def test_parse_access_log_entry_keeps_spaces_inside_direct_json(self):
+        line = '{"status":200,"user_agent":"Mozilla/5.0 (Macintosh)"}'
+        self.assertEqual(
+            parse_access_log_entry(line),
+            {"status": 200, "user_agent": "Mozilla/5.0 (Macintosh)"},
+        )
+
+    def test_persistent_access_logs_reads_the_requested_date(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            path = f"{log_dir}/access-2026-06-21.jsonl"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write('{"status":200}\n{"status":201}\n')
+            self.assertEqual(
+                persistent_access_logs("2026-06-21", log_dir=log_dir),
+                ['{"status":200}', '{"status":201}'],
+            )
+
+    def test_persistent_access_logs_tails_without_a_full_file_load(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            path = f"{log_dir}/access-2026-06-21.jsonl"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(f'{{"status":{status}}}' for status in range(5)))
+            self.assertEqual(
+                persistent_access_logs("2026-06-21", tail=2, log_dir=log_dir),
+                ['{"status":3}', '{"status":4}'],
+            )
+
+    def test_persistent_access_logs_returns_empty_for_a_missing_date(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            self.assertEqual(
+                persistent_access_logs("2026-06-21", log_dir=log_dir),
+                [],
+            )
 
     def test_today_jst_date_is_todays_date_in_jst(self):
         self.assertEqual(today_jst_date(), datetime.now(JST).date().isoformat())

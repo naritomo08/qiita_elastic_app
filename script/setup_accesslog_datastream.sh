@@ -57,4 +57,3 @@ curl -fsS -X PUT "${ES_URL}/_index_template/logs_access_template" \
   }'
 
 echo "[INFO] setup completed."
-EOF

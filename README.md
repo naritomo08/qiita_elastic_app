@@ -236,17 +236,37 @@ GET /api/access-logs?date=2026-06-19&full=1
 
 frontendのNginxは、ブラウザから実際に届いたリクエストだけを`access_json`形式でログ出力し、稼働状況画面の「アクセスログ」セクションに表示します。ヘルスチェックやコンテナメトリクスの取得など、画面が自動で行う監視系リクエスト（`/health*`、`/api/container-metrics`、`/api/access-logs`自身）はNginxの`map`でログ出力自体から除外しているため、実際の利用者操作だけが残ります。
 
-ログはファイルローテーションではなく、取得時に対象日のJST 0:00〜翌0:00を`since`/`until`としてDocker Logs APIへ問い合わせる方式で日次に区切っています。`date`省略時は当日（JST）が対象になります。
+ログはDockerの名前付きボリューム`frontend_access_logs`へ、JSTの日付ごとの
+`access-YYYY-MM-DD.jsonl`として保存します。`date`省略時は当日（JST）が対象になります。
+frontendコンテナを再作成しても名前付きボリュームは残るため、Docker logging driverの
+ローカルキャッシュ保持量には依存しません。
 
 | パラメータ | 説明 |
 |---|---|
 | `tail` | 直近N件を取得（省略時200、最大1000）。稼働状況画面の自動更新（5秒ごと）で使用 |
-| `full=1` | 対象日分を上限なし（最大20000件）で取得。CSVダウンロードで使用 |
+| `full=1` | 対象日分を全件取得。CSVダウンロードとElasticsearch投入で使用 |
 | `date` | 取得対象日を`YYYY-MM-DD`（JST）で指定。省略時は当日。不正な値（`abc`、`2026/06/20`、`2026-13-99`など）はHTTP 400 |
 
-`date`はDocker Logs APIの`since`/`until`にそのまま変換されるため、全ログを読み込んでからのフィルタリングは発生せず、指定日の範囲だけをDocker側で絞り込んで取得します。日次のElasticsearch投入バッチは、当日分の取り込み漏れ・バッチ失敗時の再投入・Elasticsearch再構築時の過去データ復旧・cron停止時の欠損を、`date`を指定して該当日を再取得することで埋め合わせできます。
+`date`に対応する日次ファイルだけを読み込むため、他の日付のログを走査しません。日次の
+Elasticsearch投入バッチは、当日分の取り込み漏れ・バッチ失敗時の再投入・
+Elasticsearch再構築時の過去データ復旧・cron停止時の欠損を、`date`を指定して
+該当日を再取得することで埋め合わせできます。
 
-ログの実体はfrontendコンテナの標準出力（`docker logs`相当）です。`metrics`サービスがDockerソケット経由でこれを読み出し、Dockerが付与するタイムスタンプ接頭辞を取り除いた上でJSONとして解き、Elasticsearch/Kibana/Iceberg/Hive/Trinoへそのまま投入できる形に詰め直して`logs`へ格納し、Nginxが`/api/access-logs`としてプロキシします。`metrics`サービスはCompose内に閉じているため、外部システムから取得する場合はfrontendの8082番ポートへ直接アクセスします。
+Nginxは同じ`access_json`を標準出力と永続ボリュームへ二重出力します。標準出力は従来どおり
+Dockerのsyslog logging driverへ送られ、`metrics`サービスは永続ボリュームを読み取り専用で
+マウントしてAPIレスポンスを構築します。API取得元とsyslog配送経路が分離されているため、
+syslogサーバーやDockerログキャッシュの状態でAPIの過去ログが欠落しません。
+
+永続ログは`access_log_maintenance`サービスが1時間ごとに確認し、標準では更新から14日を
+超えた日次ファイルを削除します。保持日数はCompose起動時に
+`ACCESS_LOG_RETENTION_DAYS`で変更できます。
+
+```bash
+ACCESS_LOG_RETENTION_DAYS=30 docker compose up -d
+```
+
+`metrics`サービスはCompose内に閉じているため、外部システムから取得する場合はfrontendの
+8082番ポートへ直接アクセスします。
 
 各ログレコードは以下のように加工されます。
 

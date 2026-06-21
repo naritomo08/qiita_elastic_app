@@ -4,6 +4,7 @@ import os
 import re
 import socket
 import socketserver
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
@@ -14,10 +15,10 @@ DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "qiita_elastic_app")
 PORT = int(os.getenv("PORT", "8090"))
 HOST_HOSTNAME_FILE = os.getenv("HOST_HOSTNAME_FILE", "/host/etc-hostname")
+ACCESS_LOG_DIR = os.getenv("ACCESS_LOG_DIR", "/var/log/qiita-access")
 JST = timezone(timedelta(hours=9))
 LOG_TAIL_DEFAULT = 200
 LOG_TAIL_MAX = 1000
-LOG_FULL_DAY_MAX = 20000
 DATE_PARAM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -183,29 +184,33 @@ def day_bounds_jst(date_str):
     return int(start_jst.timestamp()), int(end_jst.timestamp())
 
 
-def container_logs(service, tail, since, until):
-    container = find_container(service)
-    if container is None:
-        raise RuntimeError(f"container not found for service: {service}")
-    status, body = docker_get_raw(
-        f"/containers/{quote(container['Id'])}/logs"
-        f"?stdout=1&stderr=1&timestamps=1&tail={tail}&since={since}&until={until}"
-    )
-    if status != 200:
-        raise RuntimeError(f"Docker API returned {status}")
-    return container, demux_docker_log_stream(body)
-
-
 def parse_tail(value):
     if value is None or not value.isdigit():
         return LOG_TAIL_DEFAULT
     return min(int(value), LOG_TAIL_MAX)
 
 
+def access_log_path(date_str, log_dir=ACCESS_LOG_DIR):
+    return os.path.join(log_dir, f"access-{date_str}.jsonl")
+
+
+def persistent_access_logs(date_str, tail=None, log_dir=ACCESS_LOG_DIR):
+    path = access_log_path(date_str, log_dir)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            if tail is None:
+                return [line.rstrip("\n") for line in handle]
+            return list(deque((line.rstrip("\n") for line in handle), maxlen=tail))
+    except FileNotFoundError:
+        return []
+
+
 def parse_access_log_entry(line):
-    """Strip the Docker `timestamps=1` prefix and decode the JSON access_log entry."""
-    separator = line.find(" ")
-    json_part = line[separator + 1:] if separator != -1 else line
+    """Decode a JSON access log line, accepting the old Docker timestamp prefix too."""
+    json_part = line
+    if not line.lstrip().startswith("{"):
+        separator = line.find(" ")
+        json_part = line[separator + 1:] if separator != -1 else line
     try:
         return json.loads(json_part)
     except ValueError:
@@ -271,15 +276,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"error": "invalid date, expected YYYY-MM-DD"})
             return
         full = (query.get("full") or [""])[0] == "1"
-        tail = LOG_FULL_DAY_MAX if full else parse_tail((query.get("tail") or [None])[0])
-        since, until = day_bounds_jst(date_param)
+        tail = None if full else parse_tail((query.get("tail") or [None])[0])
+        target_date = date_param or today_jst_date()
         try:
-            container, lines = container_logs(service, tail, since, until)
+            if service != "frontend":
+                self.send_json(400, {"error": "persistent access logs are only available for frontend"})
+                return
+            container = find_container(service)
+            if container is None:
+                raise RuntimeError(f"container not found for service: {service}")
+            lines = persistent_access_logs(target_date, tail)
             container_name = container_display_name(container)
             logs = [
                 enrich_log_entry(entry, service, HOST_HOSTNAME, container_name)
                 for entry in map(parse_access_log_entry, lines)
                 if entry is not None
+                and timestamp_to_jst_date(entry.get("time", "")) == target_date
             ]
             self.send_json(
                 200,
@@ -288,8 +300,9 @@ class Handler(BaseHTTPRequestHandler):
                     "service": service,
                     "host": HOST_HOSTNAME,
                     "container": container_name,
-                    "date": date_param or today_jst_date(),
+                    "date": target_date,
                     "count": len(logs),
+                    "source": "persistent-volume",
                     "logs": logs,
                 },
             )
