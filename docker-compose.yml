@@ -179,7 +179,7 @@ services:
       driver: syslog
       options:
         syslog-address: "tcp://127.0.0.1:514"
-        tag: "{{.Name}}"
+        tag: "nginx"
     restart: unless-stopped
 
   loadtest:
