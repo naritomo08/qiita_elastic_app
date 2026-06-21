@@ -1,303 +1,280 @@
-# Iceberg AccessLog → Elasticsearch(Data Stream) 連携手順【完全版】
+# Nginx Access Log → Iceberg 取り込み手順（完全版）
 
 ## 概要
 
-本手順では Iceberg に格納された nginx_access_curated テーブルを Elasticsearch Data Stream へ日次バッチ投入する。
-
-構成は以下。
+既存の `hive_prod.logs.syslog_iceberg` に格納された nginx コンテナの JSON ログを解析し、
 
 ```text
-Iceberg
-  hive_prod.logs.nginx_access_curated
-        ↓
-Spark SQL
-        ↓
-Bulk API
-        ↓
-Elasticsearch Data Stream
-  logs-access-iceberg
-        ↓
-Kibana
+hive_prod.logs.syslog_iceberg
+    ↓
+hive_prod.logs.nginx_access_curated
 ```
 
-特徴
-
-- Icebergを正本として利用
-- Elasticsearchは検索用
-- Data Stream利用
-- ILMによる自動ローテーション
-- 14日保持後自動削除
-- cronによる定期実行可能
+へ日次バッチで取り込む。
 
 ---
 
-# 1. ILMポリシー作成
+## Iceberg テーブル作成
 
-```bash
-curl -X PUT "http://elastic1:9200/_ilm/policy/logs-access-iceberg-policy" \
--H "Content-Type: application/json" \
--d '{
-  "policy": {
-    "phases": {
-      "hot": {
-        "actions": {
-          "rollover": {
-            "max_age": "1d",
-            "max_primary_shard_size": "5gb"
-          }
-        }
-      },
-      "delete": {
-        "min_age": "14d",
-        "actions": {
-          "delete": {}
-        }
-      }
-    }
-  }
-}'
+```sql
+%spark.sql
+
+CREATE TABLE hive_prod.logs.nginx_access_curated (
+  event_time timestamp,
+  host string,
+  container_name string,
+  client_ip string,
+  method string,
+  uri string,
+  status int,
+  body_bytes_sent bigint,
+  request_time double,
+  upstream_addr string,
+  user_agent string,
+  raw_msg string,
+  dt date,
+  hr int
+)
+USING iceberg
+LOCATION 'hdfs://cluster1/warehouse/iceberg/logs/nginx_access_curated'
+PARTITIONED BY (dt)
+TBLPROPERTIES (
+  'format-version'='2',
+  'write.distribution-mode'='hash'
+);
 ```
 
 ---
 
-# 2. Index Template作成
+## Nginx JSONログ例
 
-```bash
-curl -X PUT "http://elastic1:9200/_index_template/logs-access-iceberg-template" \
--H "Content-Type: application/json" \
--d '{
-  "index_patterns": ["logs-access-iceberg"],
-  "priority": 600,
-  "data_stream": {},
-  "template": {
-    "settings": {
-      "index.lifecycle.name": "logs-access-iceberg-policy"
-    },
-    "mappings": {
-      "properties": {
-        "@timestamp": { "type": "date" },
-        "dt": {
-          "type": "date",
-          "format": "strict_date||yyyy-MM-dd"
-        },
-        "host": { "type": "keyword" },
-        "container_name": { "type": "keyword" },
-        "client_ip": { "type": "ip" },
-        "method": { "type": "keyword" },
-        "uri": { "type": "keyword" },
-        "status": { "type": "integer" },
-        "body_bytes_sent": { "type": "long" },
-        "request_time": { "type": "double" },
-        "referer": { "type": "keyword" },
-        "user_agent": { "type": "text" }
-      }
-    }
-  }
-}'
+```json
+{
+  "time":"2026-06-20T23:23:09+00:00",
+  "remote_addr":"192.168.11.128",
+  "method":"GET",
+  "uri":"/api/php/articles?page=1&size=1",
+  "status":200,
+  "body_bytes_sent":10550,
+  "request_time":0.010,
+  "upstream_addr":"172.25.0.5:5000",
+  "user_agent":"Mozilla/5.0"
+}
 ```
 
 ---
 
-# 3. Data Stream作成
+## 取り込みシェル
 
-```bash
-curl -X PUT \
-"http://elastic1:9200/_data_stream/logs-access-iceberg"
+ファイル:
+
+```text
+/opt/iceberg/bin/load_nginx_access_to_iceberg.sh
 ```
-
-確認
-
-```bash
-curl -s \
-"http://elastic1:9200/_data_stream/logs-access-iceberg?pretty"
-```
-
----
-
-# 4. Spark取り込みシェル作成
-
-```bash
-sudo mkdir -p /opt/elastic/bin
-```
-
-```bash
-sudo vi /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
-```
-
-以下を配置する。
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-ES_URL="${ES_URL:-http://elastic1:9200}"
-DATA_STREAM="${DATA_STREAM:-logs-access-iceberg}"
-
+DT="${1:-$(date -d 'yesterday' +%F)}"
+PROGRAM_LIKE="${2:-%qiita-search-frontend%}"
 SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
-CATALOG="${CATALOG:-hive_prod}"
-DB="${DB:-logs}"
-TABLE="${TABLE:-nginx_access_curated}"
 
-TARGET_DT="${1:-$(date -d 'yesterday' +%F)}"
-
-LOG_DIR="${LOG_DIR:-/tmp}"
-WORK_DIR="${WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
-
-mkdir -p "${WORK_DIR}"
+SRC_TABLE="${SRC_TABLE:-hive_prod.logs.syslog_iceberg}"
+DST_TABLE="${DST_TABLE:-hive_prod.logs.nginx_access_curated}"
 
 log() {
-  echo "[$(date '+%F %T')] $*"
+  echo "[INFO] $(date '+%F %T') $*"
 }
 
-JSON_DIR="${WORK_DIR}/json"
-BULK_FILE="${WORK_DIR}/bulk.ndjson"
-SQL_FILE="${WORK_DIR}/export.sql"
+err() {
+  echo "[ERROR] $(date '+%F %T') $*" >&2
+}
 
-mkdir -p "${JSON_DIR}"
+extract_last_integer() {
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 ~ /^[0-9]+$/) val=$0
+    }
+    END {
+      if (val == "") exit 1
+      print val
+    }
+  '
+}
 
-cat > "${SQL_FILE}" <<EOSQL
-CREATE OR REPLACE TEMP VIEW accesslog_export AS
+run_spark_count() {
+  local sql="$1"
+  local out rc
+
+  set +e
+  out=$(${SPARK_SQL} 2>&1 <<SQL
+${sql}
+SQL
+)
+  rc=$?
+  set -e
+
+  if [ "${rc}" -ne 0 ]; then
+    printf '%s\n' "${out}" >&2
+    err "spark-sql failed"
+    return 1
+  fi
+
+  printf '%s\n' "${out}" | extract_last_integer
+}
+
+log "nginx access reload start dt=${DT} program_like=${PROGRAM_LIKE}"
+log "src_table=${SRC_TABLE}"
+log "dst_table=${DST_TABLE}"
+
+${SPARK_SQL} <<SQL
+REFRESH TABLE ${SRC_TABLE};
+
+CREATE TABLE IF NOT EXISTS ${DST_TABLE} (
+  event_time timestamp,
+  host string,
+  container_name string,
+  remote_addr string,
+  method string,
+  uri string,
+  status int,
+  body_bytes_sent bigint,
+  request_time double,
+  upstream_addr string,
+  user_agent string,
+  raw_msg string,
+  dt date,
+  hr int
+)
+USING iceberg
+PARTITIONED BY (dt);
+
+DELETE FROM ${DST_TABLE}
+WHERE dt = DATE '${DT}'
+  AND container_name LIKE '${PROGRAM_LIKE}';
+
+INSERT INTO ${DST_TABLE}
+WITH src AS (
+  SELECT
+    host,
+    program AS container_name,
+    msg AS raw_msg,
+    get_json_object(msg, '$.time') AS json_time,
+    get_json_object(msg, '$.remote_addr') AS remote_addr,
+    get_json_object(msg, '$.method') AS method,
+    get_json_object(msg, '$.uri') AS uri,
+    get_json_object(msg, '$.status') AS status,
+    get_json_object(msg, '$.body_bytes_sent') AS body_bytes_sent,
+    get_json_object(msg, '$.request_time') AS request_time,
+    get_json_object(msg, '$.upstream_addr') AS upstream_addr,
+    get_json_object(msg, '$.user_agent') AS user_agent
+  FROM ${SRC_TABLE}
+  WHERE dt = DATE '${DT}'
+    AND program LIKE '${PROGRAM_LIKE}'
+    AND msg LIKE '{%'
+    AND get_json_object(msg, '$.time') IS NOT NULL
+)
 SELECT
-  date_format(event_time,
-    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'") AS `@timestamp`,
-  CAST(dt AS STRING) dt,
+  to_timestamp(json_time) AS event_time,
   host,
   container_name,
-  client_ip,
+  remote_addr,
   method,
   uri,
-  status,
-  body_bytes_sent,
-  request_time,
-  referer,
-  user_agent
-FROM ${CATALOG}.${DB}.${TABLE}
-WHERE dt = DATE '${TARGET_DT}';
+  CAST(status AS INT) AS status,
+  CAST(body_bytes_sent AS BIGINT) AS body_bytes_sent,
+  CAST(request_time AS DOUBLE) AS request_time,
+  upstream_addr,
+  user_agent,
+  raw_msg,
+  CAST(to_timestamp(json_time) AS DATE) AS dt,
+  HOUR(to_timestamp(json_time)) AS hr
+FROM src;
+SQL
 
-INSERT OVERWRITE DIRECTORY '${JSON_DIR}'
-USING json
-SELECT * FROM accesslog_export;
-EOSQL
+log "nginx access reload done dt=${DT}"
+log "start count check dt=${DT}"
 
-${SPARK_SQL} -f "${SQL_FILE}"
+SRC_COUNT="$(run_spark_count "
+SELECT COUNT(*)
+FROM ${SRC_TABLE}
+WHERE dt = DATE '${DT}'
+  AND program LIKE '${PROGRAM_LIKE}'
+  AND msg LIKE '{%'
+  AND get_json_object(msg, '$.time') IS NOT NULL;
+")"
 
-: > "${BULK_FILE}"
+DST_COUNT="$(run_spark_count "
+SELECT COUNT(*)
+FROM ${DST_TABLE}
+WHERE dt = DATE '${DT}';
+")"
 
-find "${JSON_DIR}" -name 'part-*' | while read f
-do
-  while read line
-  do
-    echo '{ "create": { "_index": "'"${DATA_STREAM}"'" } }' \
-      >> "${BULK_FILE}"
-    echo "${line}" >> "${BULK_FILE}"
-  done < "${f}"
-done
+DIFF=$((DST_COUNT - SRC_COUNT))
 
-curl \
--H "Content-Type: application/x-ndjson" \
--X POST \
-"${ES_URL}/_bulk?refresh=true" \
---data-binary @"${BULK_FILE}"
+log "src_count=${SRC_COUNT}"
+log "dst_count=${DST_COUNT}"
+log "diff=${DIFF}"
 
-log "[INFO] completed"
-```
+if [ "${SRC_COUNT}" != "${DST_COUNT}" ]; then
+  err "nginx access count mismatch dt=${DT} src=${SRC_COUNT} dst=${DST_COUNT}"
+  exit 1
+fi
 
-権限付与
-
-```bash
-chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
-```
-
----
-
-# 5. 実行
-
-前日分
-
-```bash
-/opt/elastic/bin/export_accesslog_iceberg_to_es.sh
-```
-
-任意日
-
-```bash
-/opt/elastic/bin/export_accesslog_iceberg_to_es.sh 2026-06-20
+log "OK nginx access count matched dt=${DT}"
+log "nginx access reload finished dt=${DT}"
 ```
 
 ---
 
-# 6. 件数確認
+## 実行例
 
-Iceberg側
+```bash
+TARGET_DATE="2026-06-20"
+
+/opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" qiita-search-frontend
+/opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" elastic-search-frontend
+/opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" trino-search-frontend
+```
+
+---
+
+## Zeppelin / Trino 件数確認
 
 ```sql
-SELECT count(*)
-FROM hive_prod.logs.nginx_access_curated
-WHERE dt = DATE '2026-06-20';
-```
+SELECT 'syslog_nginx' AS src, count(*) AS cnt
+FROM iceberg.logs.syslog_iceberg
+WHERE dt = current_date - INTERVAL '1' day
+  AND program LIKE '%qiita-search-frontend%'
 
-Elasticsearch側
+UNION ALL
 
-```bash
-curl -s \
-"http://elastic1:9200/logs-access-iceberg/_count?q=dt:2026-06-20"
-```
-
----
-
-# 7. Data Stream確認
-
-```bash
-curl -s \
-"http://elastic1:9200/_data_stream/logs-access-iceberg?pretty"
+SELECT 'nginx_access' AS src, count(*) AS cnt
+FROM iceberg.logs.nginx_access_curated
+WHERE dt = current_date - INTERVAL '1' day
+  AND container_name LIKE '%qiita-search-frontend%';
 ```
 
 ---
 
-# 8. Kibana登録
+## データ確認
 
-Data View
-
-```text
-logs-access-iceberg
-```
-
-Time Field
-
-```text
-@timestamp
+```sql
+SELECT *
+FROM iceberg.logs.nginx_access_curated
+WHERE dt = current_date - INTERVAL '1' day
+ORDER BY event_time DESC
+LIMIT 20;
 ```
 
 ---
 
-# 9. cron登録
-
-毎日01:30実行
-
-```bash
-crontab -e
-```
+## cron例
 
 ```cron
-30 1 * * * /opt/elastic/bin/export_accesslog_iceberg_to_es.sh \
->> /tmp/export_accesslog_iceberg_to_es.log 2>&1
+30 1 * * * /opt/iceberg/bin/load_nginx_access_to_iceberg.sh $(date -d 'yesterday' +\%F) qiita-search-frontend
+35 1 * * * /opt/iceberg/bin/load_nginx_access_to_iceberg.sh $(date -d 'yesterday' +\%F) elastic-search-frontend
+40 1 * * * /opt/iceberg/bin/load_nginx_access_to_iceberg.sh $(date -d 'yesterday' +\%F) trino-search-frontend
 ```
-
----
-
-# 運用イメージ
-
-```text
-nginx access log
-      ↓
-Iceberg
-      ↓
-Spark SQL
-      ↓
-logs-access-iceberg
-      ↓
-Kibana
-```
-
-ローテーション・保持期間管理は Elasticsearch ILM が実施するため、
-日付付き index の削除シェルは不要。
