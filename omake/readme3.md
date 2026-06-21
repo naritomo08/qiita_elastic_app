@@ -264,10 +264,12 @@ sudo chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
 
 Iceberg側
 
-```sql
-SELECT count(*)
+```bash
+sudo -u spark /usr/local/bin/spark-sql-iceberg -e "
+SELECT count(*) AS cnt
 FROM hive_prod.logs.nginx_access_curated
 WHERE dt = DATE '2026-06-21';
+"
 ```
 
 Elasticsearch側
