@@ -119,186 +119,141 @@ curl -s \
 # 4. Spark取り込みシェル作成
 
 ```bash
-sudo tee /opt/elastic/bin/export_accesslog_iceberg_to_es.sh >/dev/null <<'EOF'
+sudo tee /opt/iceberg/bin/load_nginx_access_to_iceberg.sh >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ES_URL="${ES_URL:-http://elastic1:9200}"
-DATA_STREAM="${DATA_STREAM:-logs-access-iceberg}"
-
 SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
-HDFS="${HDFS:-sudo -u spark hdfs dfs}"
 
-CATALOG="${CATALOG:-hive_prod}"
-DB="${DB:-logs}"
-TABLE="${TABLE:-nginx_access_curated}"
+SRC_TABLE="${SRC_TABLE:-hive_prod.logs.syslog_iceberg}"
+DST_TABLE="${DST_TABLE:-hive_prod.logs.nginx_access_curated}"
 
 TARGET_DT="${1:-$(date -d 'yesterday' +%F)}"
-NEXT_DT="$(date -d "${TARGET_DT} +1 day" +%F)"
-
-LOCAL_WORK_DIR="${LOCAL_WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
-HDFS_WORK_DIR="${HDFS_WORK_DIR:-/tmp/accesslog_iceberg_es_${TARGET_DT}_$$}"
-
-SQL_FILE="${LOCAL_WORK_DIR}/export.sql"
-BULK_FILE="${LOCAL_WORK_DIR}/bulk.ndjson"
-RESP_FILE="${LOCAL_WORK_DIR}/bulk_response.json"
-DELETE_RESP_FILE="${LOCAL_WORK_DIR}/delete_response.json"
-
-mkdir -p "${LOCAL_WORK_DIR}"
+PROGRAM_LIKE="${2:-qiita-search-frontend}"
 
 log() {
-  echo "[$(date '+%F %T')] $*"
+  echo "[INFO] $(date '+%F %T') $*"
 }
 
-cleanup() {
-  rm -rf "${LOCAL_WORK_DIR}"
-  ${HDFS} -rm -r -f "${HDFS_WORK_DIR}" >/dev/null 2>&1 || true
+err() {
+  echo "[ERROR] $(date '+%F %T') $*" >&2
 }
-trap cleanup EXIT
 
 if ! [[ "${TARGET_DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  log "[ERROR] TARGET_DT must be YYYY-MM-DD. input=${TARGET_DT}"
+  err "TARGET_DT must be YYYY-MM-DD. input=${TARGET_DT}"
   exit 1
 fi
 
-log "[INFO] TARGET_DT=${TARGET_DT}"
-log "[INFO] NEXT_DT=${NEXT_DT}"
-log "[INFO] DATA_STREAM=${DATA_STREAM}"
-log "[INFO] TABLE=${CATALOG}.${DB}.${TABLE}"
-log "[INFO] LOCAL_WORK_DIR=${LOCAL_WORK_DIR}"
-log "[INFO] HDFS_WORK_DIR=${HDFS_WORK_DIR}"
+PROGRAM_PATTERN="%${PROGRAM_LIKE}%"
 
-log "[INFO] delete existing documents from Elasticsearch. dt=${TARGET_DT}"
+log "nginx access reload start dt=${TARGET_DT} program_like=${PROGRAM_LIKE}"
+log "src_table=${SRC_TABLE}"
+log "dst_table=${DST_TABLE}"
 
-HTTP_CODE=$(curl -s -o "${DELETE_RESP_FILE}" -w "%{http_code}" \
-  -H "Content-Type: application/json" \
-  -X POST "${ES_URL}/${DATA_STREAM}/_delete_by_query?conflicts=proceed&refresh=true&wait_for_completion=true" \
-  -d '{
-    "query": {
-      "range": {
-        "dt": {
-          "gte": "'"${TARGET_DT}"'",
-          "lt": "'"${NEXT_DT}"'"
-        }
-      }
-    }
-  }')
+${SPARK_SQL} <<EOSQL
+REFRESH TABLE ${SRC_TABLE};
 
-if [ "${HTTP_CODE}" != "200" ]; then
-  log "[ERROR] delete_by_query failed. http_code=${HTTP_CODE}"
-  cat "${DELETE_RESP_FILE}"
-  exit 1
-fi
+CREATE TABLE IF NOT EXISTS ${DST_TABLE} (
+  event_time timestamp,
+  host string,
+  container_name string,
+  remote_addr string,
+  method string,
+  uri string,
+  status int,
+  body_bytes_sent bigint,
+  request_time double,
+  upstream_addr string,
+  user_agent string,
+  raw_msg string,
+  dt date,
+  hr int
+)
+USING iceberg
+PARTITIONED BY (dt);
 
-DELETED_COUNT=$(jq -r '.deleted // 0' "${DELETE_RESP_FILE}")
-log "[INFO] deleted existing docs=${DELETED_COUNT}"
+DELETE FROM ${DST_TABLE}
+WHERE dt = DATE '${TARGET_DT}'
+  AND container_name LIKE '${PROGRAM_PATTERN}';
 
-${HDFS} -rm -r -f "${HDFS_WORK_DIR}" >/dev/null 2>&1 || true
-${HDFS} -mkdir -p "${HDFS_WORK_DIR}" >/dev/null
-
-cat > "${SQL_FILE}" <<EOSQL
-CREATE OR REPLACE TEMP VIEW accesslog_export AS
+INSERT INTO ${DST_TABLE}
+WITH src AS (
+  SELECT
+    host,
+    program AS container_name,
+    msg AS raw_msg,
+    get_json_object(msg, '$.time') AS json_time,
+    get_json_object(msg, '$.remote_addr') AS remote_addr,
+    get_json_object(msg, '$.method') AS method,
+    get_json_object(msg, '$.uri') AS uri,
+    get_json_object(msg, '$.status') AS status,
+    get_json_object(msg, '$.body_bytes_sent') AS body_bytes_sent,
+    get_json_object(msg, '$.request_time') AS request_time,
+    get_json_object(msg, '$.upstream_addr') AS upstream_addr,
+    get_json_object(msg, '$.user_agent') AS user_agent
+  FROM ${SRC_TABLE}
+  WHERE dt BETWEEN DATE '${TARGET_DT}' - INTERVAL 1 DAY
+               AND DATE '${TARGET_DT}' + INTERVAL 1 DAY
+    AND program LIKE '${PROGRAM_PATTERN}'
+    AND msg LIKE '{%'
+    AND get_json_object(msg, '$.time') IS NOT NULL
+)
 SELECT
-  concat(date_format(event_time, "yyyy-MM-dd'T'HH:mm:ss.SSS"), '+09:00') AS \`@timestamp\`,
-  CAST(dt AS STRING) AS dt,
-  CAST(host AS STRING) AS host,
-  CAST(container_name AS STRING) AS container_name,
-  CAST(client_ip AS STRING) AS client_ip,
-  CAST(method AS STRING) AS method,
-  CAST(uri AS STRING) AS uri,
+  to_timestamp(json_time) AS event_time,
+  host,
+  container_name,
+  remote_addr,
+  method,
+  uri,
   CAST(status AS INT) AS status,
   CAST(body_bytes_sent AS BIGINT) AS body_bytes_sent,
   CAST(request_time AS DOUBLE) AS request_time,
-  CAST(upstream_addr AS STRING) AS upstream_addr,
-  CAST(user_agent AS STRING) AS user_agent,
-  CAST(raw_msg AS STRING) AS raw_msg,
-  CAST(hr AS INT) AS hr
-FROM ${CATALOG}.${DB}.${TABLE}
-WHERE dt = DATE '${TARGET_DT}';
-
-INSERT OVERWRITE DIRECTORY '${HDFS_WORK_DIR}/json'
-USING json
-SELECT * FROM accesslog_export;
+  upstream_addr,
+  user_agent,
+  raw_msg,
+  CAST(to_timestamp(json_time) AS DATE) AS dt,
+  HOUR(to_timestamp(json_time)) AS hr
+FROM src
+WHERE CAST(to_timestamp(json_time) AS DATE) = DATE '${TARGET_DT}';
 EOSQL
 
-log "[INFO] export Iceberg to JSONL by Spark"
-${SPARK_SQL} -f "${SQL_FILE}"
+log "nginx access reload done dt=${TARGET_DT}"
 
-log "[INFO] check exported files on HDFS"
-${HDFS} -ls "${HDFS_WORK_DIR}/json" || {
-  log "[ERROR] HDFS json directory not found: ${HDFS_WORK_DIR}/json"
-  exit 1
-}
+log "start count check dt=${TARGET_DT}"
 
-DOC_COUNT=$(${HDFS} -cat "${HDFS_WORK_DIR}/json/part-*" 2>/dev/null | wc -l | awk '{print $1}')
+SRC_COUNT=$(${SPARK_SQL} -e "
+SELECT count(*)
+FROM ${SRC_TABLE}
+WHERE dt BETWEEN DATE '${TARGET_DT}' - INTERVAL 1 DAY
+             AND DATE '${TARGET_DT}' + INTERVAL 1 DAY
+  AND program LIKE '${PROGRAM_PATTERN}'
+  AND msg LIKE '{%'
+  AND get_json_object(msg, '$.time') IS NOT NULL
+  AND CAST(to_timestamp(get_json_object(msg, '$.time')) AS DATE) = DATE '${TARGET_DT}';
+" | grep -E '^[0-9]+$' | tail -1)
 
-if [ "${DOC_COUNT}" -eq 0 ]; then
-  log "[WARN] no records found. TARGET_DT=${TARGET_DT}"
-  exit 0
-fi
+DST_COUNT=$(${SPARK_SQL} -e "
+SELECT count(*)
+FROM ${DST_TABLE}
+WHERE dt = DATE '${TARGET_DT}'
+  AND container_name LIKE '${PROGRAM_PATTERN}';
+" | grep -E '^[0-9]+$' | tail -1)
 
-log "[INFO] exported docs=${DOC_COUNT}"
+DIFF=$((DST_COUNT - SRC_COUNT))
 
-: > "${BULK_FILE}"
+log "src_count=${SRC_COUNT}"
+log "dst_count=${DST_COUNT}"
+log "diff=${DIFF}"
 
-${HDFS} -cat "${HDFS_WORK_DIR}/json/part-*" | while IFS= read -r json_line; do
-  printf '{ "create": { "_index": "%s" } }\n' "${DATA_STREAM}" >> "${BULK_FILE}"
-  printf '%s\n' "${json_line}" >> "${BULK_FILE}"
-done
-
-BULK_LINES=$(wc -l < "${BULK_FILE}" | awk '{print $1}')
-log "[INFO] bulk lines=${BULK_LINES}"
-
-if [ "${BULK_LINES}" -eq 0 ]; then
-  log "[ERROR] bulk file is empty"
-  exit 1
-fi
-
-log "[INFO] bulk upload to Elasticsearch"
-
-HTTP_CODE=$(curl -s -o "${RESP_FILE}" -w "%{http_code}" \
-  -H "Content-Type: application/x-ndjson" \
-  -X POST "${ES_URL}/_bulk?refresh=true" \
-  --data-binary @"${BULK_FILE}")
-
-if [ "${HTTP_CODE}" != "200" ]; then
-  log "[ERROR] bulk request failed. http_code=${HTTP_CODE}"
-  cat "${RESP_FILE}"
+if [ "${SRC_COUNT}" -ne "${DST_COUNT}" ]; then
+  err "nginx access count mismatch dt=${TARGET_DT} src=${SRC_COUNT} dst=${DST_COUNT}"
   exit 1
 fi
 
-HAS_ERRORS=$(jq -r '.errors' "${RESP_FILE}")
-
-if [ "${HAS_ERRORS}" != "false" ]; then
-  log "[ERROR] bulk completed with item errors"
-  jq '.items[] | select(.create.error != null) | .create.error' "${RESP_FILE}" | head -20
-  exit 1
-fi
-
-ES_COUNT=$(curl -s "${ES_URL}/${DATA_STREAM}/_count" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": {
-      "range": {
-        "dt": {
-          "gte": "'"${TARGET_DT}"'",
-          "lt": "'"${NEXT_DT}"'"
-        }
-      }
-    }
-  }' | jq -r '.count')
-
-log "[INFO] bulk completed"
-log "[INFO] source_docs=${DOC_COUNT}"
-log "[INFO] deleted_before_insert=${DELETED_COUNT}"
-log "[INFO] es_count_dt_${TARGET_DT}=${ES_COUNT}"
-
-if [ "${ES_COUNT}" -ne "${DOC_COUNT}" ]; then
-  log "[WARN] count mismatch. source=${DOC_COUNT}, es=${ES_COUNT}"
-fi
+log "nginx access count check ok dt=${TARGET_DT}"
 EOF
 
-sudo chmod +x /opt/elastic/bin/export_accesslog_iceberg_to_es.sh
+sudo chmod +x /opt/iceberg/bin/load_nginx_access_to_iceberg.sh
 ```
 
 ---
