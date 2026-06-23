@@ -26,6 +26,8 @@ let backendRefreshTimer;
 
 marked.setOptions({ gfm: true, breaks: true });
 
+redirectReloadToHome();
+
 window.addEventListener("popstate", renderRoute);
 backendSelect.addEventListener("change", async () => {
   if (!BACKENDS[backendSelect.value]) return;
@@ -89,6 +91,17 @@ document.addEventListener("submit", async (event) => {
 });
 
 bootstrap();
+
+function redirectReloadToHome() {
+  const navigation = performance.getEntriesByType("navigation")[0];
+  const isReload = navigation
+    ? navigation.type === "reload"
+    : performance.navigation?.type === 1;
+
+  if (isReload && (location.pathname !== "/" || location.search || location.hash)) {
+    history.replaceState({}, "", "/");
+  }
+}
 
 async function bootstrap() {
   await refreshBackends();
