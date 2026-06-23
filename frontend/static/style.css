@@ -1310,12 +1310,24 @@ mark {
   }
 
   .header-inner {
-    min-height: 68px;
+    min-height: 0;
+    padding-block: 12px 10px;
+    flex-wrap: wrap;
     gap: 10px;
   }
 
+  .brand {
+    width: 100%;
+  }
+
+  .header-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .health-link {
-    display: none;
+    display: inline-block;
+    white-space: nowrap;
   }
 
   .backend-selector > span {
