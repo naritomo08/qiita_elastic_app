@@ -9,8 +9,9 @@ frontend/
 ├── Dockerfile                       # 静的資産のビルドと Nginx イメージ作成
 ├── index.html                       # 画面の HTML
 ├── static/
-│   ├── app.js                       # 検索、詳細、監視画面のクライアント処理
-│   └── style.css                    # 画面スタイル
+│   ├── js/                          # ルーティング、ページ、部品、共通処理
+│   ├── css/                         # 共通、記事本文、監視画面、レスポンシブ
+│   └── style.css                    # 分割CSSのエントリーポイント
 ├── build-assets.sh                  # CSS/JS のハッシュ付きファイル名生成
 ├── nginx.conf                       # 配信、API プロキシ、アクセスログ設定
 ├── proxy_params                     # バックエンド共通のプロキシヘッダー
@@ -31,4 +32,4 @@ docker compose build frontend
 docker compose up frontend
 ```
 
-`static/app.js` と `static/style.css` は依存ツールのない素の資産です。モジュール分割する場合は、ブラウザ向けバンドル方式または ES Modules の導入とセットで検討します。
+`static/js/app.js` はブラウザ標準の ES Modules、`static/style.css` は CSS の `@import` を使って分割しています。Node.js やバンドラーは不要です。

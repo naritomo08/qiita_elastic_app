@@ -1,0 +1,294 @@
+.site-footer {
+  padding: 30px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .container {
+    width: min(100% - 28px, 1120px);
+  }
+
+  .header-inner {
+    min-height: 0;
+    padding-block: 12px 10px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .brand {
+    width: 100%;
+  }
+
+  .header-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .health-link {
+    display: inline-block;
+    white-space: nowrap;
+  }
+
+  .backend-selector > span {
+    display: none;
+  }
+
+  .backend-selector select {
+    width: 104px;
+    max-width: 104px;
+  }
+
+  .all-articles-link {
+    padding-left: 6px;
+    padding-right: 0;
+  }
+
+  .health-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .health-refresh-button {
+    width: 100%;
+  }
+
+  .health-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .health-summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .health-summary time {
+    width: 100%;
+    margin-left: 20px;
+  }
+
+  .hero {
+    padding: 62px 0 56px;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.65rem, 11vw, 3.5rem);
+  }
+
+  .hero-copy {
+    font-size: 0.9rem;
+  }
+
+  .search-form {
+    width: 100%;
+    max-width: none;
+  }
+
+  .search-box {
+    gap: 8px;
+    padding-left: 16px;
+  }
+
+  .search-box input {
+    font-size: 1rem;
+  }
+
+  .search-box button {
+    padding: 12px 17px;
+  }
+
+  .article-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-heading,
+  .results-summary {
+    align-items: start;
+  }
+
+  .article-list-controls {
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .article-list-controls .article-count,
+  .article-list-controls time {
+    display: none;
+  }
+
+  .result-card,
+  .article-card {
+    padding: 23px;
+  }
+
+  .article-card {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .article-card h3,
+  .article-card .excerpt {
+    overflow-wrap: anywhere;
+  }
+
+  .results-summary > strong {
+    font-size: 1.9rem;
+  }
+
+  .article-dates {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .active-filter {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .active-filter a {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .link-preview-card:has(.link-preview-image) {
+    grid-template-columns: minmax(0, 1fr) 110px;
+  }
+
+  .link-preview-description {
+    display: none;
+  }
+}
+
+@media (max-width: 430px) {
+  .container {
+    width: calc(100% - 16px);
+  }
+
+  .header-inner {
+    min-height: 0;
+    padding-block: 12px 10px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .brand {
+    width: 100%;
+    gap: 13px;
+  }
+
+  .brand-mark {
+    width: 50px;
+    height: 50px;
+    border-radius: 14px;
+    font-size: 1.45rem;
+  }
+
+  .brand strong {
+    font-size: 1.12rem;
+    line-height: 1.3;
+  }
+
+  .brand small {
+    margin-top: 0;
+    font-size: 0.7rem;
+  }
+
+  .header-nav {
+    width: 100%;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .backend-selector select {
+    width: 104px;
+    max-width: 104px;
+  }
+
+  .all-articles-link {
+    padding: 8px 4px;
+    font-size: 0.85rem;
+  }
+
+  .health-link {
+    display: inline-block;
+    padding: 8px 4px;
+    white-space: nowrap;
+  }
+
+  .hero {
+    width: calc(100vw - 16px);
+    margin-left: calc(50% - 50vw + 8px);
+    padding: 48px 0 46px;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.5rem, 12vw, 3.2rem);
+    line-height: 1.16;
+  }
+
+  .hero-copy {
+    margin: 20px auto;
+    padding-inline: 8px;
+  }
+
+  .article-total {
+    margin-bottom: 24px;
+  }
+
+  .search-box {
+    padding: 8px 8px 8px 14px;
+    border-radius: 15px;
+  }
+
+  .search-box button {
+    padding: 13px 16px;
+  }
+
+  #home-articles {
+    width: calc(100vw - 16px);
+    margin-left: calc(50% - 50vw + 8px);
+  }
+
+  .section-heading {
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .section-heading h2 {
+    font-size: 1.65rem;
+    line-height: 1.35;
+  }
+
+  .article-grid {
+    gap: 12px;
+  }
+
+  .article-card {
+    padding: 20px 18px;
+    border-radius: 15px;
+  }
+
+  .article-card h3 {
+    font-size: 1.18rem;
+  }
+
+  .excerpt {
+    font-size: 0.88rem;
+  }
+}

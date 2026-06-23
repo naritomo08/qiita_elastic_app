@@ -1,0 +1,158 @@
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+import { api, escapeHtml } from "../common.js";
+
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: "strict",
+  theme: "neutral",
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
+  flowchart: { htmlLabels: false, useMaxWidth: true },
+});
+
+export async function renderMermaid() {
+  const blocks = [...document.querySelectorAll(".markdown-body pre > code.language-mermaid")];
+  for (const [index, code] of blocks.entries()) {
+    const source = code.textContent;
+    const diagram = document.createElement("div");
+    diagram.className = "mermaid-diagram";
+    diagram.id = `mermaid-diagram-${index}`;
+    diagram.textContent = source;
+    code.parentElement.replaceWith(diagram);
+    try {
+      await mermaid.run({ nodes: [diagram] });
+    } catch {
+      diagram.outerHTML = `<p class="mermaid-error-message">Mermaid図を描画できないため、定義を表示しています。</p><pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
+    }
+  }
+}
+
+export function enhanceCodeBlocks() {
+  document.querySelectorAll(".markdown-body pre").forEach((pre) => {
+    if (pre.parentElement?.classList.contains("code-block")) return;
+
+    const code = pre.querySelector(":scope > code");
+    if (!code) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+    pre.before(wrapper);
+    wrapper.append(pre);
+
+    const button = document.createElement("button");
+    button.className = "code-copy-button";
+    button.type = "button";
+    button.setAttribute("aria-label", "コードをコピー");
+    button.title = "コードをコピー";
+    button.innerHTML = `
+      <svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M8 8V5.8A1.8 1.8 0 0 1 9.8 4h8.4A1.8 1.8 0 0 1 20 5.8v8.4a1.8 1.8 0 0 1-1.8 1.8H16"></path>
+        <rect x="4" y="8" width="12" height="12" rx="2"></rect>
+      </svg>
+      <svg class="check-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <path d="m5 12 4 4L19 6"></path>
+      </svg>
+      <span class="sr-only code-copy-status" aria-live="polite"></span>
+    `;
+    wrapper.append(button);
+
+    button.addEventListener("click", async () => {
+      window.clearTimeout(button.copyStatusTimer);
+      try {
+        await copyText(code.textContent);
+        button.classList.remove("is-copy-error");
+        button.classList.add("is-copied");
+        button.setAttribute("aria-label", "コピーしました");
+        button.title = "コピーしました";
+        button.querySelector(".code-copy-status").textContent = "コピーしました";
+      } catch {
+        button.classList.remove("is-copied");
+        button.classList.add("is-copy-error");
+        button.setAttribute("aria-label", "コピーできませんでした");
+        button.title = "コピーできませんでした";
+        button.querySelector(".code-copy-status").textContent = "コピーできませんでした";
+      }
+      button.copyStatusTimer = window.setTimeout(() => {
+        button.classList.remove("is-copied", "is-copy-error");
+        button.setAttribute("aria-label", "コードをコピー");
+        button.title = "コードをコピー";
+        button.querySelector(".code-copy-status").textContent = "";
+      }, 1800);
+    });
+  });
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // 権限やブラウザ制限で失敗した場合は、従来方式を試す。
+    }
+  }
+
+  const activeElement = document.activeElement;
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  try {
+    textarea.select();
+    if (!document.execCommand("copy")) throw new Error("Copy failed");
+  } finally {
+    textarea.remove();
+    activeElement?.focus();
+  }
+}
+
+export async function renderLinkPreviews() {
+  const links = [...document.querySelectorAll(".markdown-body p > a[href]")].filter((link) =>
+    link.parentElement.children.length === 1 &&
+    link.parentElement.textContent.trim() === link.textContent.trim() &&
+    link.href.startsWith("http")
+  );
+  await Promise.all(links.map(async (link) => {
+    const paragraph = link.parentElement;
+    const card = document.createElement("a");
+    card.className = "link-preview-card is-loading";
+    card.href = link.href;
+    card.target = "_blank";
+    card.rel = "noopener noreferrer";
+    card.innerHTML = `<span class="link-preview-content"><strong class="link-preview-title">${escapeHtml(link.textContent)}</strong><small class="link-preview-site">${escapeHtml(new URL(link.href).hostname)}</small></span><span class="link-preview-arrow">↗</span>`;
+    paragraph.replaceWith(card);
+    try {
+      const preview = await api("/api/link-preview", { url: link.href });
+      card.classList.remove("is-loading");
+      card.querySelector(".link-preview-title").textContent = preview.title;
+      card.querySelector(".link-preview-site").textContent = preview.site_name;
+      if (preview.description) {
+        const description = document.createElement("span");
+        description.className = "link-preview-description";
+        description.textContent = preview.description;
+        card.querySelector(".link-preview-content").append(description);
+      }
+      if (preview.image) {
+        const image = document.createElement("img");
+        image.className = "link-preview-image";
+        image.src = preview.image;
+        image.alt = "";
+        image.loading = "lazy";
+        image.referrerPolicy = "no-referrer";
+        card.prepend(image);
+      }
+    } catch {
+      card.classList.remove("is-loading");
+    }
+  }));
+}
+
+export function secureArticleLinks() {
+  document.querySelectorAll(".markdown-body a[href]").forEach((link) => {
+    if (link.href.startsWith("http")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+  });
+}

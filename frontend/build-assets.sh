@@ -18,7 +18,7 @@ if [ "$source_dir" = "$output_dir" ]; then
   exit 1
 fi
 
-for required_file in index.html static/style.css static/app.js; do
+for required_file in index.html static/style.css static/js/app.js; do
   if [ ! -f "$source_dir/$required_file" ]; then
     echo "Missing source file: $source_dir/$required_file" >&2
     exit 1
@@ -30,11 +30,17 @@ mkdir -p "$static_dir"
 cp "$source_dir/index.html" "$output_dir/index.html"
 cp -R "$source_dir/static/." "$static_dir/"
 
-for asset in style.css app.js; do
-  extension=${asset##*.}
-  basename=${asset%.*}
+for asset in style.css js/app.js; do
+  directory=${asset%/*}
+  filename=${asset##*/}
+  extension=${filename##*.}
+  basename=${filename%.*}
+  if [ "$directory" = "$asset" ]; then
+    directory=""
+  fi
   hash=$(sha256sum "$source_dir/static/$asset" | cut -c1-12)
-  fingerprinted_asset="$basename.$hash.$extension"
+  fingerprinted_filename="$basename.$hash.$extension"
+  fingerprinted_asset="${directory:+$directory/}$fingerprinted_filename"
 
   mv "$static_dir/$asset" "$static_dir/$fingerprinted_asset"
   sed "s|/static/$asset|/static/$fingerprinted_asset|g" "$output_dir/index.html" > "$output_dir/index.html.tmp"
