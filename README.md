@@ -322,7 +322,9 @@ curl -s "http://localhost:8082/api/access-logs?full=1" | jq -c '.logs[] | {index
   | curl -s -H "Content-Type: application/x-ndjson" -XPOST "http://elastic1:9200/_bulk" --data-binary @-
 ```
 
-稼働状況画面の「CSVダウンロード」ボタンは、ブラウザ上で`full=1`の結果をCSV（UTF-8 BOM付き、時刻はJST表記）に変換してダウンロードします。
+稼働状況画面では対象日を指定して「表示」を押すと、その日の直近200件を表示します。
+5秒ごとの自動更新と「CSVダウンロード」は同じ対象日を使用し、CSVは対象日を
+`date`に指定した`full=1`の結果を、UTF-8 BOM付き・JST表記で全件ダウンロードします。
 
 過去日分を再投入する場合（バッチ失敗時の再実行やElasticsearch再構築時の復旧）は`date`を指定します。
 

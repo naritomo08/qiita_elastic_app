@@ -10,6 +10,7 @@ import {
   downloadAccessLogCsv,
   renderHealthDashboard,
   stopHealthMonitoring,
+  updateAccessLogs,
   updateHealthDashboard,
 } from "./pages/health.js";
 import {
@@ -72,7 +73,13 @@ document.addEventListener("click", async (event) => {
   renderRoute();
 });
 
-document.addEventListener("submit", (event) => {
+document.addEventListener("submit", async (event) => {
+  if (event.target.matches("[data-access-log-form]")) {
+    event.preventDefault();
+    const date = new FormData(event.target).get("date");
+    await updateAccessLogs(date);
+    return;
+  }
   if (!event.target.matches("[data-search-form]")) return;
   event.preventDefault();
   const query = new FormData(event.target).get("q")?.trim();

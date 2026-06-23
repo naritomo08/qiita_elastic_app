@@ -15,8 +15,10 @@ import {
 let healthRefreshTimer;
 let healthRequestId = 0;
 let healthUpdateRunning = false;
+let accessLogDate = "";
 
 export async function renderHealthDashboard() {
+  accessLogDate = todayJstDate();
   document.title = "稼働状況 | Qiita Article Search";
   app.innerHTML = `
     <section class="health-page">
@@ -86,13 +88,35 @@ export async function renderHealthDashboard() {
           <div>
             <p class="eyebrow">OBSERVABILITY</p>
             <h2>アクセスログ</h2>
+            <p class="health-section-description">監視リクエストと静的ファイルを除いた、実際のブラウザ操作を表示します。</p>
           </div>
-          <div class="health-section-actions">
-            <span>画面は本日分の最新100件のみ表示（CSVは本日分の全件）</span>
-            <button class="button-secondary" type="button" data-access-log-download>本日分の全件をCSVダウンロード</button>
-          </div>
+          <form class="access-log-controls" data-access-log-form>
+            <label>
+              <span>対象日</span>
+              <input type="date" name="date" value="${accessLogDate}" max="${todayJstDate()}">
+            </label>
+            <button class="button-secondary" type="submit">表示</button>
+            <button class="button-secondary" type="button" data-access-log-download disabled>CSVダウンロード</button>
+          </form>
         </div>
-        <pre class="access-log" data-access-log>取得中…</pre>
+        <div class="access-log-summary" data-access-log-count>読込中…</div>
+        <div class="access-log-table-wrap">
+          <table class="access-log-table">
+            <thead>
+              <tr>
+                <th>時刻</th>
+                <th>接続元</th>
+                <th>Method</th>
+                <th>URI</th>
+                <th>Status</th>
+                <th>応答時間</th>
+              </tr>
+            </thead>
+            <tbody data-access-log-body>
+              <tr><td colspan="6">アクセスログを読み込んでいます…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </section>
   `;
@@ -148,7 +172,7 @@ export async function updateHealthDashboard() {
     const [results, containerMetrics, accessLogs] = await Promise.all([
       Promise.all(Object.keys(BACKENDS).map(async (key) => [key, await checkBackendHealth(key)])),
       checkContainerMetrics(),
-      checkAccessLogs(),
+      checkAccessLogs(accessLogDate),
     ]);
     if (requestId !== healthRequestId || location.pathname !== "/health") return;
 
@@ -191,30 +215,49 @@ async function checkContainerMetrics() {
   }
 }
 
-async function checkAccessLogs() {
+async function checkAccessLogs(date = accessLogDate) {
   try {
-    const response = await fetchWithTimeout("/api/access-logs?tail=100", 8000);
+    const params = new URLSearchParams({ date, tail: "200" });
+    const response = await fetchWithTimeout(`/api/access-logs?${params}`, 8000);
     const payload = await response.json();
     if (!response.ok || payload.status !== "ok") throw new Error();
-    return { ok: true, logs: payload.logs };
+    return { ok: true, requestedDate: date, date: payload.date, logs: payload.logs || [] };
   } catch {
-    return { ok: false, logs: [] };
+    return { ok: false, requestedDate: date, date: "", logs: [] };
   }
 }
 
 function updateAccessLogCard(result) {
-  const box = document.querySelector("[data-access-log]");
-  if (!box) return;
+  const body = document.querySelector("[data-access-log-body]");
+  const count = document.querySelector("[data-access-log-count]");
+  const downloadButton = document.querySelector("[data-access-log-download]");
+  if (!body) return;
+  if (result.requestedDate !== accessLogDate) return;
   if (!result.ok) {
-    box.textContent = "ログを取得できませんでした。";
+    body.innerHTML = `<tr><td colspan="6">ログを取得できませんでした。</td></tr>`;
+    if (count) count.textContent = "取得失敗";
+    if (downloadButton) downloadButton.disabled = true;
     return;
   }
+  if (count) count.textContent = `${result.date || accessLogDate} / ${result.logs.length}件（直近200件まで）`;
+  if (downloadButton) downloadButton.disabled = false;
   if (!result.logs.length) {
-    box.textContent = "アクセスログはまだありません。";
+    body.innerHTML = `<tr><td colspan="6">${escapeHtml(result.date || accessLogDate)} のアクセスログはありません。</td></tr>`;
     return;
   }
-  box.textContent = result.logs.map(formatAccessLogEntry).join("\n");
-  box.scrollTop = box.scrollHeight;
+  body.innerHTML = [...result.logs].reverse().map(accessLogRow).join("");
+}
+
+export async function updateAccessLogs(date = accessLogDate) {
+  if (location.pathname !== "/health") return;
+  accessLogDate = String(date || todayJstDate());
+  const body = document.querySelector("[data-access-log-body]");
+  const count = document.querySelector("[data-access-log-count]");
+  const downloadButton = document.querySelector("[data-access-log-download]");
+  if (body) body.innerHTML = `<tr><td colspan="6">アクセスログを読み込んでいます…</td></tr>`;
+  if (count) count.textContent = "読込中…";
+  if (downloadButton) downloadButton.disabled = true;
+  updateAccessLogCard(await checkAccessLogs(accessLogDate));
 }
 
 const JST_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
@@ -235,9 +278,20 @@ function formatJst(value) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} JST`;
 }
 
-function formatAccessLogEntry(entry) {
-  const time = formatJst(entry["@timestamp"]);
-  return `${time}  ${entry.remote_addr}  ${entry.status}  ${entry.method} ${entry.uri}  (${entry.request_time}s)`;
+function accessLogRow(entry) {
+  const status = Number(entry.status);
+  const time = entry["@timestamp"] ? formatJst(entry["@timestamp"]).replace(" JST", "") : "—";
+  const uri = entry.uri || "—";
+  return `
+    <tr>
+      <td>${escapeHtml(time)}</td>
+      <td>${escapeHtml(entry.remote_addr || "—")}</td>
+      <td>${escapeHtml(entry.method || "—")}</td>
+      <td class="access-log-uri" title="${escapeHtml(uri)}">${escapeHtml(uri)}</td>
+      <td class="${status >= 400 ? "is-error" : ""}">${escapeHtml(entry.status ?? "—")}</td>
+      <td>${escapeHtml(entry.request_time ?? "—")} s</td>
+    </tr>
+  `;
 }
 
 const ACCESS_LOG_CSV_COLUMNS = [
@@ -255,13 +309,16 @@ const ACCESS_LOG_CSV_COLUMNS = [
 export async function downloadAccessLogCsv(button) {
   button?.setAttribute("disabled", "");
   try {
-    const response = await fetchWithTimeout("/api/access-logs?full=1", 20000);
+    const response = await fetchWithTimeout(
+      `/api/access-logs?date=${encodeURIComponent(accessLogDate)}&full=1`,
+      20000
+    );
     const payload = await response.json();
     if (!response.ok || payload.status !== "ok") throw new Error();
 
     const entries = payload.logs;
     if (!entries.length) {
-      showNotice("ダウンロードできるアクセスログがありません。");
+      showNotice(`${accessLogDate} のアクセスログはありません。`);
       return;
     }
     const header = ACCESS_LOG_CSV_COLUMNS.map(([name]) => csvEscape(name)).join(",");
@@ -272,7 +329,7 @@ export async function downloadAccessLogCsv(button) {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `access-log-${csvFileTimestamp()}.csv`;
+    link.download = `access-logs-${payload.date || csvFileDate()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   } catch {
@@ -287,9 +344,13 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-function csvFileTimestamp() {
+function csvFileDate() {
   const parts = Object.fromEntries(JST_FORMATTER.formatToParts(new Date()).map((part) => [part.type, part.value]));
-  return `${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function todayJstDate() {
+  return csvFileDate();
 }
 
 export function stopHealthMonitoring() {
@@ -297,4 +358,5 @@ export function stopHealthMonitoring() {
   healthRefreshTimer = undefined;
   healthRequestId += 1;
   healthUpdateRunning = false;
+  accessLogDate = "";
 }

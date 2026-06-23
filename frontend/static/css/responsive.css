@@ -81,6 +81,27 @@
     margin-left: 20px;
   }
 
+  .health-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .access-log-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .access-log-controls label {
+    grid-column: 1 / -1;
+  }
+
+  .access-log-controls input {
+    width: 100%;
+  }
+
   .hero {
     padding: 62px 0 56px;
   }
