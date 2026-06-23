@@ -1,4 +1,4 @@
-# Iceberg AccessLog → Elasticsearch(Data Stream) 連携手順【完全版】
+# Iceberg AccessLog → Elasticsearch(Data Stream) 連携手順
 
 ## 概要
 

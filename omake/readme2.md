@@ -1,4 +1,4 @@
-# Nginx Access Log → Iceberg 取り込み手順（完全版）
+# Nginx Access Log → Iceberg 取り込み手順
 
 ## 概要
 
