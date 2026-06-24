@@ -12,4 +12,4 @@ COPY backend_python ./backend_python
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "30", "backend_python.main:app"]
+CMD ["uvicorn", "backend_python.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "2"]

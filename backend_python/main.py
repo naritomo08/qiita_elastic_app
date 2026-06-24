@@ -2,7 +2,9 @@ import os
 import time
 
 import requests
-from flask import Flask, jsonify, request
+import uvicorn
+from fastapi import FastAPI, Query
+from fastapi.responses import JSONResponse
 
 from .elasticsearch_client import (
     ArticleNotFoundError,
@@ -15,7 +17,7 @@ from .elasticsearch_client import (
 from .link_preview import get_link_preview
 
 
-app = Flask(__name__)
+app = FastAPI(title="Qiita Search Python Backend")
 repository = QiitaArticleRepository()
 
 
@@ -31,9 +33,13 @@ def parse_positive_int(
     return min(parsed, maximum) if maximum is not None else parsed
 
 
+def json_response(content: dict, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(content=content, status_code=status_code)
+
+
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok", "backend": "python"})
+    return json_response({"status": "ok", "backend": "python"})
 
 
 @app.get("/health/elasticsearch")
@@ -47,7 +53,7 @@ def elasticsearch_health():
         )
         response.raise_for_status()
         payload = response.json()
-        return jsonify(
+        return json_response(
             {
                 "status": "ok",
                 "service": "elasticsearch",
@@ -58,38 +64,43 @@ def elasticsearch_health():
             }
         )
     except (requests.RequestException, ValueError):
-        return jsonify(
+        return json_response(
             {
                 "status": "error",
                 "service": "elasticsearch",
                 "checked_by": "python",
                 "latency_ms": round((time.monotonic() - started_at) * 1000),
                 "error": "Elasticsearch に接続できませんでした。",
-            }
-        ), 503
+            },
+            503,
+        )
 
 
 @app.get("/api/recent")
-def api_recent():
-    size = parse_positive_int(request.args.get("size"), 10, 1, 100)
-    tag = request.args.get("tag", "").strip()
+def api_recent(size: str | None = Query(None), tag: str = ""):
+    parsed_size = parse_positive_int(size, 10, 1, 100)
+    parsed_tag = tag.strip()
     try:
-        results = repository.recent_articles(size=size, tag=tag or None)
-        return jsonify({"total": len(results), "results": results})
+        results = repository.recent_articles(size=parsed_size, tag=parsed_tag or None)
+        return json_response({"total": len(results), "results": results})
     except ElasticsearchServiceError as exc:
-        return jsonify({"error": str(exc)}), _status_for_error(exc)
+        return json_response({"error": str(exc)}, _status_for_error(exc))
 
 
 @app.get("/api/search")
-def api_search():
-    query = request.args.get("q", "").strip()
+def api_search(
+    q: str = "",
+    page: str | None = Query(None),
+    size: str | None = Query(None),
+):
+    query = q.strip()
     if not query:
-        return jsonify({"error": "検索キーワード q を指定してください。"}), 400
-    page = parse_positive_int(request.args.get("page"), 1)
-    size = parse_positive_int(request.args.get("size"), 10, 1, 100)
+        return json_response({"error": "検索キーワード q を指定してください。"}, 400)
+    parsed_page = parse_positive_int(page, 1)
+    parsed_size = parse_positive_int(size, 10, 1, 100)
     try:
-        result = repository.search_articles(query, page, size)
-        return jsonify(
+        result = repository.search_articles(query, parsed_page, parsed_size)
+        return json_response(
             {
                 "total": result.total,
                 "page": result.page,
@@ -98,16 +109,16 @@ def api_search():
             }
         )
     except ElasticsearchServiceError as exc:
-        return jsonify({"error": str(exc)}), _status_for_error(exc)
+        return json_response({"error": str(exc)}, _status_for_error(exc))
 
 
 @app.get("/api/articles")
-def api_articles():
-    page = parse_positive_int(request.args.get("page"), 1)
-    size = parse_positive_int(request.args.get("size"), 20, 1, 100)
+def api_articles(page: str | None = Query(None), size: str | None = Query(None)):
+    parsed_page = parse_positive_int(page, 1)
+    parsed_size = parse_positive_int(size, 20, 1, 100)
     try:
-        result = repository.list_articles(page, size)
-        return jsonify(
+        result = repository.list_articles(parsed_page, parsed_size)
+        return json_response(
             {
                 "total": result.total,
                 "page": result.page,
@@ -116,27 +127,27 @@ def api_articles():
             }
         )
     except ElasticsearchServiceError as exc:
-        return jsonify({"error": str(exc)}), _status_for_error(exc)
+        return json_response({"error": str(exc)}, _status_for_error(exc))
 
 
-@app.get("/api/articles/<path:article_id>")
+@app.get("/api/articles/{article_id:path}")
 def api_article_detail(article_id: str):
     try:
-        return jsonify(repository.get_article(article_id))
+        return json_response(repository.get_article(article_id))
     except ArticleNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        return json_response({"error": str(exc)}, 404)
     except ElasticsearchServiceError as exc:
-        return jsonify({"error": str(exc)}), _status_for_error(exc)
+        return json_response({"error": str(exc)}, _status_for_error(exc))
 
 
 @app.get("/api/link-preview")
-def api_link_preview():
+def api_link_preview(url: str = ""):
     try:
-        return jsonify(get_link_preview(request.args.get("url", "").strip()))
+        return json_response(get_link_preview(url.strip()))
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return json_response({"error": str(exc)}, 400)
     except (requests.RequestException, OSError):
-        return jsonify({"error": "リンク先の情報を取得できませんでした。"}), 502
+        return json_response({"error": "リンク先の情報を取得できませんでした。"}, 502)
 
 
 def _status_for_error(error: ElasticsearchServiceError) -> int:
@@ -150,4 +161,4 @@ def _status_for_error(error: ElasticsearchServiceError) -> int:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)

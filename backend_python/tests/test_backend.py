@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
+from fastapi.testclient import TestClient
 
 from backend_python import main
 from backend_python.elasticsearch_client import (
@@ -38,9 +39,8 @@ class FakeRepository:
 class BackendTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        main.app.config.update(TESTING=True)
         main.repository = FakeRepository()
-        cls.client = main.app.test_client()
+        cls.client = TestClient(main.app)
 
     def test_health(self):
         self.assertEqual(self.client.get("/health").status_code, 200)
@@ -48,12 +48,12 @@ class BackendTestCase(unittest.TestCase):
     def test_recent_api_with_tag(self):
         response = self.client.get("/api/recent?tag=Python&size=50")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["total"], 1)
+        self.assertEqual(response.json()["total"], 1)
 
     def test_search_api(self):
         response = self.client.get("/api/search?q=Python&page=2&size=5")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["page"], 2)
+        self.assertEqual(response.json()["page"], 2)
 
     def test_search_api_requires_query(self):
         self.assertEqual(self.client.get("/api/search").status_code, 400)
@@ -61,14 +61,14 @@ class BackendTestCase(unittest.TestCase):
     def test_all_articles_api(self):
         response = self.client.get("/api/articles?page=2&size=20")
         self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
+        payload = response.json()
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["page"], 2)
         self.assertEqual(payload["size"], 20)
 
     def test_article_api(self):
         self.assertEqual(
-            self.client.get("/api/articles/article-1").get_json()["id"], "article-1"
+            self.client.get("/api/articles/article-1").json()["id"], "article-1"
         )
         self.assertEqual(self.client.get("/api/articles/missing").status_code, 404)
 
