@@ -680,3 +680,13 @@ docker compose exec backend_python python -c \
 ```
 
 実在するインデックス名を `.env` の `ES_INDEX` に設定してください。
+
+## おまけ情報
+
+`omake/` フォルダには、本アプリのアクセスログを検索・分析用途へ活用するための補足手順を置いています。アプリの起動には必須ではありませんが、アクセスログを Elasticsearch や Iceberg に連携して、Kibana や分析基盤で確認したい場合の参考資料です。
+
+| ファイル | 概要 |
+|---|---|
+| `omake/readme1.md` | frontend のアクセスログAPIから日次ログを取得し、Elasticsearch Data Stream `logs-access` へ投入する手順。ILM、インデックステンプレート、再実行可能な取り込みシェル、cron例を含みます。 |
+| `omake/readme2.md` | syslog 側に蓄積された nginx JSONログを Spark SQL で整形し、Iceberg テーブル `hive_prod.logs.nginx_access_curated` へ日次取り込みする手順。件数確認や複数フロントエンド向けの実行例も含みます。 |
+| `omake/readme3.md` | Iceberg の `nginx_access_curated` を正本として、Elasticsearch Data Stream `logs-access-iceberg` へ連携する手順。Kibana Data View 登録や ILM による保持期間管理の運用イメージをまとめています。 |
