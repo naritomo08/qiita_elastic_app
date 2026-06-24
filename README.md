@@ -375,9 +375,9 @@ GET /api/<backend>/articles/<article_id>
 GET /api/<backend>/link-preview?url=https://qiita.com/...
 ```
 
-## バックエンドAPI互換契約
+## バックエンドAPI互換規約
 
-新しいバックエンドで以下のHTTP契約を維持します。
+新しいバックエンドで以下のHTTP規約を維持します。
 
 - `GET /health`
 - `GET /health/elasticsearch`
