@@ -208,16 +208,44 @@ export async function renderDetail(articleId) {
           <div><dt>作成</dt><dd>${formatDate(article.created_at)}</dd></div>
           <div><dt>更新</dt><dd>${formatDate(article.updated_at)}</dd></div>
         </dl>
-        ${article.url ? `<a class="original-link" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
+        <div class="detail-actions">
+          <button class="markdown-download-button" type="button" data-markdown-download>Markdownをダウンロード ↓</button>
+          ${article.url ? `<a class="original-link" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
+        </div>
       </header>
       <div class="article-body markdown-body">${markdownHtml}</div>
     </article>
   `;
 
+  document.querySelector("[data-markdown-download]")?.addEventListener("click", () => {
+    downloadMarkdown(article);
+  });
   secureArticleLinks();
   await renderMermaid();
   enhanceCodeBlocks();
   await renderLinkPreviews();
+}
+
+function downloadMarkdown(article) {
+  const markdown = String(article.body ?? "");
+  const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${markdownFileName(article.title, article.id)}.md`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function markdownFileName(title, articleId) {
+  const fallback = `article-${String(articleId ?? "download")}`;
+  const fileName = String(title || fallback)
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim();
+  return (fileName || fallback).slice(0, 100);
 }
 
 function articleGrid(articles, selectedTag) {
