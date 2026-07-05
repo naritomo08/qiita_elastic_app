@@ -1,7 +1,9 @@
 import os
+from datetime import timedelta, timezone
 from pathlib import Path
 
 
+JST = timezone(timedelta(hours=9), name="JST")
 RESULTS_ROOT = Path(os.getenv("RESULTS_DIR", "/results"))
 METRICS_URL = os.getenv("METRICS_URL", "http://metrics:8090/metrics")
 METRICS_INTERVAL = max(0.5, float(os.getenv("METRICS_INTERVAL", "2")))

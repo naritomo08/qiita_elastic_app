@@ -29,7 +29,7 @@ loadtest/
 
 ```sh
 TARGET_URL=http://frontend:8082 \
-docker compose --profile loadtest run --rm loadtest
+docker compose --profile loadtest run --rm --build loadtest
 ```
 
-結果ディレクトリには `k6-summary.json`、`k6-output.txt`、`container-metrics.csv`、`summary.txt` が作成されます。
+結果ディレクトリには `k6-summary.json`、`k6-output.txt`、`container-metrics.csv`、`summary.txt` が作成されます。結果ディレクトリ名とレポート内の日時は JST（UTC+09:00）で出力されます。

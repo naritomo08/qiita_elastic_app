@@ -5,7 +5,7 @@ import sys
 import threading
 from datetime import datetime
 
-from config import METRICS_INTERVAL, RESULTS_ROOT, TEST_SCRIPT, target_url
+from config import JST, METRICS_INTERVAL, RESULTS_ROOT, TEST_SCRIPT, target_url
 from metrics_collector import collect_metrics
 from report import timestamp, write_report
 
@@ -65,7 +65,7 @@ def main():
 
 
 def create_result_dir():
-    run_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
+    run_id = datetime.now(JST).strftime("%Y%m%d-%H%M%S-%f")
     result_dir = RESULTS_ROOT / run_id
     result_dir.mkdir(parents=True, exist_ok=False)
     return result_dir

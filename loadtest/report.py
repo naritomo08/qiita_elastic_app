@@ -3,9 +3,11 @@ import os
 from collections import defaultdict
 from datetime import datetime
 
+from config import JST
+
 
 def timestamp():
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    return datetime.now(JST).isoformat(timespec="seconds")
 
 
 def metric_value(summary, name, key, default=0):
@@ -77,8 +79,8 @@ def write_report(
         "=" * 30,
         f"Target URL: {os.getenv('TARGET_URL', '')}",
         f"Scenario: {os.getenv('SCENARIO', 'mixed')}",
-        f"Started: {started_at}",
-        f"Finished: {finished_at}",
+        f"Started (JST): {started_at}",
+        f"Finished (JST): {finished_at}",
         f"k6 exit code: {exit_code}",
         f"VUs: {os.getenv('VUS', '20')}",
         f"Duration: {os.getenv('DURATION', '1m')}",
