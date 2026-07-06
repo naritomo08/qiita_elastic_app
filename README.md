@@ -250,8 +250,9 @@ docker compose up -d --force-recreate frontend
 syslog設定を削除しても、アクセスログは引き続き名前付きボリューム
 `frontend_access_logs`へ保存されるため、稼働状況画面のログ表示には影響しません。
 
-永続ログは`access_log_maintenance`サービスが1時間ごとに確認し、標準では更新から14日を
-超えた日次ファイルを削除します。保持日数はCompose起動時に
+永続ログは`access_log_maintenance`サービスが1時間ごとに確認し、標準では最終更新から
+14日（14×24時間）以上経過した日次ファイルを削除します。実際の削除は14日経過後の
+次回確認時（最大約1時間後）に行われます。保持日数はCompose起動時に
 `ACCESS_LOG_RETENTION_DAYS`で変更できます。
 
 ```bash
