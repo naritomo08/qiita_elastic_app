@@ -15,6 +15,7 @@ export const options = buildOptions();
 export default function () {
   const path = selectPath();
   const response = http.get(`${targetUrl}${targetPath(path)}`, {
+    headers: { "X-Load-Test": "1" },
     tags: { endpoint: path.split("?")[0] },
     timeout: __ENV.REQUEST_TIMEOUT || "10s",
   });
