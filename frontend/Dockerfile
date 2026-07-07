@@ -1,7 +1,10 @@
-FROM alpine:3.20 AS builder
+FROM node:22-alpine AS builder
 
-COPY frontend /src
-RUN sh /src/build-assets.sh /src /dist
+WORKDIR /src
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
 FROM nginx:1.27-alpine
 
@@ -12,6 +15,6 @@ RUN apk add --no-cache tzdata \
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY frontend/proxy_params /etc/nginx/proxy_params
 COPY --chmod=755 frontend/05-init-access-log-volume.sh /docker-entrypoint.d/05-init-access-log-volume.sh
-COPY --from=builder /dist /usr/share/nginx/html
+COPY --from=builder /src/dist /usr/share/nginx/html
 
 EXPOSE 8082
