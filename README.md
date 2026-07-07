@@ -2,7 +2,7 @@
 
 Elasticsearchへ投入済みのQiita記事を検索・閲覧するWebアプリです。
 
-フロントエンドはPythonを使用しない静的HTML/CSS/JavaScript SPA、バックエンドは独立したREST APIです。両者はJSON APIだけで接続し、6言語の実装を同じ画面から切り替えられます。ブランチを切り替えることで、frontendに適用するフレームワークも切り替えられます。
+フロントエンドはSvelte/Vite SPA、バックエンドは独立したREST APIです。両者はJSON APIだけで接続し、6言語の実装を同じ画面から切り替えられます。ブランチを切り替えることで、frontendに適用するフレームワークも切り替えられます。
 
 事前に以下リンク先を参考にElasticSearch構築と、Qiita記事のElasticSearch取り込みを実施していること。
 
