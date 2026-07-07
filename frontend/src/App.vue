@@ -4,7 +4,7 @@
       <a class="brand" href="/" data-route>
         <span class="brand-mark">Q</span>
         <span>
-          <strong>Qiita Article Search</strong>
+          <strong>Qiita Article Search VueVite</strong>
           <small>Powered by Elasticsearch</small>
         </span>
       </a>
