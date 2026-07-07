@@ -2,7 +2,7 @@
 
 Elasticsearchへ投入済みのQiita記事を検索・閲覧するWebアプリです。
 
-フロントエンドはPythonを使用しない静的HTML/CSS/JavaScript SPA、バックエンドは独立したREST APIです。両者はJSON APIだけで接続し、6言語の実装を同じ画面から切り替えられます。
+フロントエンドはPythonを使用しない静的HTML/CSS/JavaScript SPA、バックエンドは独立したREST APIです。両者はJSON APIだけで接続し、6言語の実装を同じ画面から切り替えられます。ブランチを切り替えることで、frontendに適用するフレームワークも切り替えられます。
 
 事前に以下リンク先を参考にElasticSearch構築と、Qiita記事のElasticSearch取り込みを実施していること。
 
@@ -29,9 +29,8 @@ https://github.com/naritomo08/qiita_to_elastic
 
 - frontend
   - Nginxで静的ファイルを配信
+  - `main`は静的HTML/CSS/JavaScript、`ReactVite`、`VueVite`、`SvelteVite`は各フレームワーク版のfrontend
   - Dockerビルド時にCSS/JavaScriptへ内容ハッシュを付与
-  - Python不使用
-  - Jinja2などのサーバーサイドテンプレート不使用
   - `/api/<言語>/...` と `/health/<言語>` を各backendへリバースプロキシ
   - ブラウザからはfrontendと同じOriginだけへ接続
 - backend_python / backend_elixir / backend_php / backend_java / backend_go / backend_ruby
