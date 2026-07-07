@@ -1,5 +1,6 @@
 let mermaidInitialized = false;
 let mermaidPromise;
+const MERMAID_MODULE_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
 const qiitaArticleLinkCache = new Map();
 
 export function formatDate(value) {
@@ -109,7 +110,7 @@ async function renderMermaid(body) {
 }
 
 async function loadMermaid() {
-  mermaidPromise ||= import("mermaid").then((module) => module.default);
+  mermaidPromise ||= import(/* @vite-ignore */ MERMAID_MODULE_URL).then((module) => module.default);
   return mermaidPromise;
 }
 
