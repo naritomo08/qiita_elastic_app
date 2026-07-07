@@ -1,5 +1,7 @@
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-import { api, escapeHtml } from "../common.js";
+import { api, escapeHtml, stripMarkdown } from "../common.js";
+
+const qiitaArticleLinkCache = new Map();
 
 mermaid.initialize({
   startOnLoad: false,
@@ -111,17 +113,31 @@ export async function renderLinkPreviews() {
   const links = [...document.querySelectorAll(".markdown-body p > a[href]")].filter((link) =>
     link.parentElement.children.length === 1 &&
     link.parentElement.textContent.trim() === link.textContent.trim() &&
-    link.href.startsWith("http")
+    link.href.startsWith("http") &&
+    (link.origin !== location.origin || link.dataset.localArticlePreview === "true")
   );
   await Promise.all(links.map(async (link) => {
     const paragraph = link.parentElement;
     const card = document.createElement("a");
-    card.className = "link-preview-card is-loading";
+    const isLocalArticle = link.dataset.localArticlePreview === "true";
+    card.className = `link-preview-card${isLocalArticle ? "" : " is-loading"}`;
     card.href = link.href;
     card.target = "_blank";
     card.rel = "noopener noreferrer";
     card.innerHTML = `<span class="link-preview-content"><strong class="link-preview-title">${escapeHtml(link.textContent)}</strong><small class="link-preview-site">${escapeHtml(new URL(link.href).hostname)}</small></span><span class="link-preview-arrow">↗</span>`;
     paragraph.replaceWith(card);
+    if (isLocalArticle) {
+      card.querySelector(".link-preview-title").textContent = link.dataset.previewTitle || link.textContent;
+      card.querySelector(".link-preview-site").textContent = link.dataset.previewSite || "Qiita Article Search";
+      if (link.dataset.previewDescription) {
+        const description = document.createElement("span");
+        description.className = "link-preview-description";
+        description.textContent = link.dataset.previewDescription;
+        card.querySelector(".link-preview-content").append(description);
+      }
+      return;
+    }
+
     try {
       const preview = await api("/api/link-preview", { url: link.href });
       card.classList.remove("is-loading");
@@ -148,11 +164,59 @@ export async function renderLinkPreviews() {
   }));
 }
 
+export async function convertExistingQiitaArticleLinks() {
+  const links = [...document.querySelectorAll(".markdown-body a[href]")];
+  await Promise.all(links.map(async (link) => {
+    const articleId = qiitaArticleId(link.href);
+    const article = articleId ? await localArticle(articleId) : null;
+    if (!article) return;
+
+    link.href = `/articles/${encodeURIComponent(articleId)}`;
+    link.dataset.localArticlePreview = "true";
+    link.dataset.previewTitle = article.title || "無題の記事";
+    link.dataset.previewSite = "本サイト内の記事";
+    link.dataset.previewDescription = stripMarkdown(article.body || "").slice(0, 160);
+    link.removeAttribute("data-route");
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }));
+}
+
 export function secureArticleLinks() {
   document.querySelectorAll(".markdown-body a[href]").forEach((link) => {
-    if (link.href.startsWith("http")) {
+    if (link.href.startsWith("http") && link.origin !== location.origin) {
       link.target = "_blank";
       link.rel = "noopener noreferrer";
     }
   });
+}
+
+function qiitaArticleId(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return "";
+  }
+
+  if (!["qiita.com", "www.qiita.com"].includes(url.hostname.toLowerCase())) return "";
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts.length < 3 || parts[1] !== "items") return "";
+
+  try {
+    return decodeURIComponent(parts[2]);
+  } catch {
+    return parts[2];
+  }
+}
+
+async function localArticle(articleId) {
+  if (!qiitaArticleLinkCache.has(articleId)) {
+    qiitaArticleLinkCache.set(
+      articleId,
+      api(`/api/articles/${encodeURIComponent(articleId)}`)
+        .catch(() => null)
+    );
+  }
+  return qiitaArticleLinkCache.get(articleId);
 }

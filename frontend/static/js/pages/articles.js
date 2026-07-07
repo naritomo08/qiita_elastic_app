@@ -13,6 +13,7 @@ import {
   stripMarkdown,
 } from "../common.js";
 import {
+  convertExistingQiitaArticleLinks,
   enhanceCodeBlocks,
   renderLinkPreviews,
   renderMermaid,
@@ -220,6 +221,7 @@ export async function renderDetail(articleId) {
   document.querySelector("[data-markdown-download]")?.addEventListener("click", () => {
     downloadMarkdown(article);
   });
+  await convertExistingQiitaArticleLinks();
   secureArticleLinks();
   await renderMermaid();
   enhanceCodeBlocks();
