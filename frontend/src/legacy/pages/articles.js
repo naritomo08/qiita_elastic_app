@@ -1,6 +1,4 @@
 import { HOME_REFRESH_INTERVAL } from "../config.js";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import { app } from "../state.js";
 import {
   api,
@@ -14,17 +12,10 @@ import {
   showNotice,
   stripMarkdown,
 } from "../common.js";
-import {
-  convertExistingQiitaArticleLinks,
-  enhanceCodeBlocks,
-  renderArticleTree,
-  renderLinkPreviews,
-  renderMermaid,
-  secureArticleLinks,
-} from "../components/markdown.js";
 
 let homeRefreshTimer;
 let homeUpdateRunning = false;
+let markdownToolsPromise;
 
 export async function renderAllArticles() {
   const params = new URLSearchParams(location.search);
@@ -192,11 +183,14 @@ export async function renderSearch() {
 }
 
 export async function renderDetail(articleId) {
-  const article = await api(`/api/articles/${encodeURIComponent(articleId)}`);
+  const [article, markdownTools] = await Promise.all([
+    api(`/api/articles/${encodeURIComponent(articleId)}`),
+    loadMarkdownTools(),
+  ]);
   document.title = `${article.title || "無題の記事"} | Qiita Article Search`;
 
   const source = removeDangerousBlocks(article.body || "本文がありません。");
-  const markdownHtml = DOMPurify.sanitize(marked.parse(source), {
+  const markdownHtml = markdownTools.DOMPurify.sanitize(markdownTools.marked.parse(source), {
     USE_PROFILES: { html: true },
     ADD_ATTR: ["target", "rel", "class"],
   });
@@ -231,12 +225,30 @@ export async function renderDetail(articleId) {
   document.querySelector("[data-markdown-download]")?.addEventListener("click", () => {
     downloadMarkdown(article);
   });
-  await convertExistingQiitaArticleLinks();
-  renderArticleTree();
-  secureArticleLinks();
-  await renderMermaid();
-  enhanceCodeBlocks();
-  await renderLinkPreviews();
+  await markdownTools.convertExistingQiitaArticleLinks();
+  markdownTools.renderArticleTree();
+  markdownTools.secureArticleLinks();
+  await markdownTools.renderMermaid();
+  markdownTools.enhanceCodeBlocks();
+  await markdownTools.renderLinkPreviews();
+}
+
+function loadMarkdownTools() {
+  if (!markdownToolsPromise) {
+    markdownToolsPromise = Promise.all([
+      import("dompurify"),
+      import("marked"),
+      import("../components/markdown.js"),
+    ]).then(([dompurifyModule, markedModule, markdownTools]) => {
+      markedModule.marked.setOptions({ gfm: true, breaks: true });
+      return {
+        DOMPurify: dompurifyModule.default,
+        marked: markedModule.marked,
+        ...markdownTools,
+      };
+    });
+  }
+  return markdownToolsPromise;
 }
 
 function downloadMarkdown(article) {

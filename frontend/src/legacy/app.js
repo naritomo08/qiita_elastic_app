@@ -1,5 +1,4 @@
 import { BACKENDS, BACKEND_CHECK_INTERVAL } from "./config.js";
-import { marked } from "marked";
 import { app, backendSelect, selectBackend, state } from "./state.js";
 import { refreshBackendAvailability } from "./backend.js";
 import {
@@ -7,25 +6,10 @@ import {
   renderError,
   showPendingBackendNotice,
 } from "./common.js";
-import {
-  downloadAccessLogCsv,
-  renderHealthDashboard,
-  stopHealthMonitoring,
-  updateAccessLogs,
-  updateHealthDashboard,
-} from "./pages/health.js";
-import {
-  renderAllArticles,
-  renderDetail,
-  renderHome,
-  renderSearch,
-  stopHomeMonitoring,
-  updateHomeArticles,
-} from "./pages/articles.js";
 
 let backendRefreshTimer;
-
-marked.setOptions({ gfm: true, breaks: true });
+let articlesPagePromise;
+let healthPagePromise;
 
 redirectReloadToHome();
 
@@ -40,6 +24,7 @@ backendSelect.addEventListener("change", async () => {
 document.addEventListener("click", async (event) => {
   const healthRefreshButton = event.target.closest("[data-health-refresh]");
   if (healthRefreshButton) {
+    const { updateHealthDashboard } = await loadHealthPage();
     await updateHealthDashboard();
     return;
   }
@@ -47,12 +32,14 @@ document.addEventListener("click", async (event) => {
   const homeRefreshButton = event.target.closest("[data-home-refresh]");
   if (homeRefreshButton) {
     const tag = new URLSearchParams(location.search).get("tag")?.trim() || "";
+    const { updateHomeArticles } = await loadArticlesPage();
     await updateHomeArticles(tag);
     return;
   }
 
   const accessLogDownloadButton = event.target.closest("[data-access-log-download]");
   if (accessLogDownloadButton) {
+    const { downloadAccessLogCsv } = await loadHealthPage();
     await downloadAccessLogCsv(accessLogDownloadButton);
     return;
   }
@@ -68,6 +55,7 @@ document.addEventListener("click", async (event) => {
   ) {
     const tag = link.dataset.tag || "";
     history.pushState({}, "", tag ? `/?tag=${encodeURIComponent(tag)}` : "/");
+    const { updateHomeArticles } = await loadArticlesPage();
     await updateHomeArticles(tag);
     return;
   }
@@ -80,6 +68,7 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-access-log-form]")) {
     event.preventDefault();
     const date = new FormData(event.target).get("date");
+    const { updateAccessLogs } = await loadHealthPage();
     await updateAccessLogs(date);
     return;
   }
@@ -111,8 +100,8 @@ async function bootstrap() {
 }
 
 async function renderRoute() {
-  stopHealthMonitoring();
-  stopHomeMonitoring();
+  stopHealthMonitoringIfLoaded();
+  stopHomeMonitoringIfLoaded();
   window.scrollTo({ top: 0 });
   const path = location.pathname;
   if (!state.availableBackendKeys.size && path !== "/health") {
@@ -121,14 +110,19 @@ async function renderRoute() {
   }
   try {
     if (path === "/health") {
+      const { renderHealthDashboard } = await loadHealthPage();
       await renderHealthDashboard();
     } else if (path.startsWith("/articles/")) {
+      const { renderDetail } = await loadArticlesPage();
       await renderDetail(decodeURIComponent(path.slice("/articles/".length)));
     } else if (path === "/all") {
+      const { renderAllArticles } = await loadArticlesPage();
       await renderAllArticles();
     } else if (path === "/search") {
+      const { renderSearch } = await loadArticlesPage();
       await renderSearch();
     } else {
+      const { renderHome } = await loadArticlesPage();
       await renderHome();
     }
   } catch (error) {
@@ -141,4 +135,26 @@ async function renderRoute() {
 
 function refreshBackends() {
   return refreshBackendAvailability({ renderRoute, renderBackendUnavailable });
+}
+
+function loadArticlesPage() {
+  if (!articlesPagePromise) {
+    articlesPagePromise = import("./pages/articles.js");
+  }
+  return articlesPagePromise;
+}
+
+function loadHealthPage() {
+  if (!healthPagePromise) {
+    healthPagePromise = import("./pages/health.js");
+  }
+  return healthPagePromise;
+}
+
+function stopHomeMonitoringIfLoaded() {
+  articlesPagePromise?.then(({ stopHomeMonitoring }) => stopHomeMonitoring());
+}
+
+function stopHealthMonitoringIfLoaded() {
+  healthPagePromise?.then(({ stopHealthMonitoring }) => stopHealthMonitoring());
 }
