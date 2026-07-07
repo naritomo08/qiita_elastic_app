@@ -1,4 +1,5 @@
 import { BACKENDS, BACKEND_CHECK_INTERVAL } from "./config.js";
+import { marked } from "marked";
 import { app, backendSelect, selectBackend, state } from "./state.js";
 import { refreshBackendAvailability } from "./backend.js";
 import {

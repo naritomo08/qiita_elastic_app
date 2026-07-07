@@ -3,7 +3,7 @@ import { BACKENDS } from "./config.js";
 let selectedBackend = localStorage.getItem("qiita-search-backend");
 if (!BACKENDS[selectedBackend]) selectedBackend = "python";
 
-export const app = document.querySelector("#app");
+export const app = document.querySelector("#legacy-app");
 export const backendSelect = document.querySelector("#backend-select");
 export const state = {
   selectedBackend,

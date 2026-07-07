@@ -1,4 +1,6 @@
 import { HOME_REFRESH_INTERVAL } from "../config.js";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { app } from "../state.js";
 import {
   api,

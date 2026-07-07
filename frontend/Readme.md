@@ -1,18 +1,22 @@
 # Frontend
 
-静的な検索画面を Nginx で配信し、各言語のバックエンド、メトリクス API、アクセスログ API へのリバースプロキシも担当します。
+Vue + Vite でビルドした検索画面を Nginx で配信し、各言語のバックエンド、メトリクス API、アクセスログ API へのリバースプロキシも担当します。
 
 ## ファイル構成
 
 ```text
 frontend/
-├── Dockerfile                       # 静的資産のビルドと Nginx イメージ作成
-├── index.html                       # 画面の HTML
+├── Dockerfile                       # Viteビルドと Nginx イメージ作成
+├── index.html                       # Vite の HTML エントリーポイント
+├── package.json                     # Vue + Vite の依存関係と npm scripts
+├── vite.config.js                   # Vite 設定
+├── src/
+│   ├── App.vue                      # Vue のルートコンポーネント
+│   ├── main.js                      # Vue アプリのエントリーポイント
+│   └── legacy/                      # 既存SPAロジックを Vite 管理下へ移したコード
 ├── static/
-│   ├── js/                          # ルーティング、ページ、部品、共通処理
 │   ├── css/                         # 共通、記事本文、監視画面、レスポンシブ
 │   └── style.css                    # 分割CSSのエントリーポイント
-├── build-assets.sh                  # CSS/JS のハッシュ付きファイル名生成
 ├── nginx.conf                       # 配信、API プロキシ、アクセスログ設定
 ├── proxy_params                     # バックエンド共通のプロキシヘッダー
 └── 05-init-access-log-volume.sh     # アクセスログ用ボリュームの初期化
@@ -32,4 +36,10 @@ docker compose build frontend
 docker compose up frontend
 ```
 
-`static/js/app.js` はブラウザ標準の ES Modules、`static/style.css` は CSS の `@import` を使って分割しています。Node.js やバンドラーは不要です。
+ローカルで Node.js が利用できる場合は、フロントエンドだけを Vite dev server で起動できます。
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
