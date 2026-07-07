@@ -1,6 +1,7 @@
 import { api, escapeHtml, stripMarkdown } from "../common.js";
 
 const qiitaArticleLinkCache = new Map();
+const MERMAID_MODULE_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
 let mermaidModulePromise;
 
 export async function renderMermaid() {
@@ -25,7 +26,7 @@ export async function renderMermaid() {
 
 async function loadMermaid() {
   if (!mermaidModulePromise) {
-    mermaidModulePromise = import("mermaid").then(({ default: mermaid }) => {
+    mermaidModulePromise = import(/* @vite-ignore */ MERMAID_MODULE_URL).then(({ default: mermaid }) => {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
