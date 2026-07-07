@@ -2,6 +2,9 @@ import { api } from "./api.js";
 import { escapeHtml, stripMarkdown } from "./utils.js";
 
 const qiitaArticleLinkCache = new Map();
+const MERMAID_MODULE_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs";
+let mermaidPromise;
+let mermaidInitialized = false;
 
 export async function enhanceArticleMarkdown() {
   await convertExistingQiitaArticleLinks();
@@ -13,14 +16,18 @@ export async function enhanceArticleMarkdown() {
 }
 
 async function loadMermaid() {
-  const { default: mermaid } = await import("mermaid");
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: "neutral",
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
-    flowchart: { htmlLabels: false, useMaxWidth: true },
-  });
+  mermaidPromise ||= import(/* @vite-ignore */ MERMAID_MODULE_URL).then(({ default: mermaid }) => mermaid);
+  const mermaid = await mermaidPromise;
+  if (!mermaidInitialized) {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "neutral",
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
+      flowchart: { htmlLabels: false, useMaxWidth: true },
+    });
+    mermaidInitialized = true;
+  }
   return mermaid;
 }
 
