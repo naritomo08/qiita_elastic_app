@@ -84,7 +84,3 @@ async function requestElasticsearchHealth(key) {
     return { ok: false, checkedBy: key };
   }
 }
-
-export function backendLabel(key) {
-  return BACKENDS[key]?.label || key;
-}
