@@ -7,13 +7,6 @@ import {
   showPendingBackendNotice,
 } from "./common.js";
 import {
-  downloadAccessLogCsv,
-  renderHealthDashboard,
-  stopHealthMonitoring,
-  updateAccessLogs,
-  updateHealthDashboard,
-} from "./pages/health.js";
-import {
   renderAllArticles,
   renderDetail,
   renderHome,
@@ -23,8 +16,20 @@ import {
 } from "./pages/articles.js";
 
 let backendRefreshTimer;
+let healthModule;
+let healthModulePromise;
 
-marked.setOptions({ gfm: true, breaks: true });
+async function loadHealthModule() {
+  healthModulePromise ||= import("./pages/health.js").then((module) => {
+    healthModule = module;
+    return module;
+  });
+  return healthModulePromise;
+}
+
+function stopHealthMonitoringIfLoaded() {
+  healthModule?.stopHealthMonitoring();
+}
 
 redirectReloadToHome();
 
@@ -39,7 +44,8 @@ backendSelect.addEventListener("change", async () => {
 document.addEventListener("click", async (event) => {
   const healthRefreshButton = event.target.closest("[data-health-refresh]");
   if (healthRefreshButton) {
-    await updateHealthDashboard();
+    const health = await loadHealthModule();
+    await health.updateHealthDashboard();
     return;
   }
 
@@ -52,7 +58,8 @@ document.addEventListener("click", async (event) => {
 
   const accessLogDownloadButton = event.target.closest("[data-access-log-download]");
   if (accessLogDownloadButton) {
-    await downloadAccessLogCsv(accessLogDownloadButton);
+    const health = await loadHealthModule();
+    await health.downloadAccessLogCsv(accessLogDownloadButton);
     return;
   }
 
@@ -79,7 +86,8 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-access-log-form]")) {
     event.preventDefault();
     const date = new FormData(event.target).get("date");
-    await updateAccessLogs(date);
+    const health = await loadHealthModule();
+    await health.updateAccessLogs(date);
     return;
   }
   if (!event.target.matches("[data-search-form]")) return;
@@ -110,7 +118,7 @@ async function bootstrap() {
 }
 
 async function renderRoute() {
-  stopHealthMonitoring();
+  stopHealthMonitoringIfLoaded();
   stopHomeMonitoring();
   window.scrollTo({ top: 0 });
   const path = location.pathname;
@@ -120,7 +128,8 @@ async function renderRoute() {
   }
   try {
     if (path === "/health") {
-      await renderHealthDashboard();
+      const health = await loadHealthModule();
+      await health.renderHealthDashboard();
     } else if (path.startsWith("/articles/")) {
       await renderDetail(decodeURIComponent(path.slice("/articles/".length)));
     } else if (path === "/all") {

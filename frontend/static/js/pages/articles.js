@@ -12,17 +12,47 @@ import {
   showNotice,
   stripMarkdown,
 } from "../common.js";
-import {
-  convertExistingQiitaArticleLinks,
-  enhanceCodeBlocks,
-  renderArticleTree,
-  renderLinkPreviews,
-  renderMermaid,
-  secureArticleLinks,
-} from "../components/markdown.js";
 
 let homeRefreshTimer;
 let homeUpdateRunning = false;
+let markdownLibraryPromise;
+let markdownComponentsPromise;
+const scriptPromises = new Map();
+const MARKED_URL = "https://cdn.jsdelivr.net/npm/marked@15/marked.min.js";
+const DOMPURIFY_URL = "https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js";
+
+function loadScript(src) {
+  if (scriptPromises.has(src)) return scriptPromises.get(src);
+
+  const promise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.append(script);
+  });
+  scriptPromises.set(src, promise);
+  return promise;
+}
+
+async function loadMarkdownLibraries() {
+  markdownLibraryPromise ||= Promise.all([
+    loadScript(MARKED_URL),
+    loadScript(DOMPURIFY_URL),
+  ]).then(() => {
+    const { marked, DOMPurify } = window;
+    if (!marked || !DOMPurify) throw new Error("Markdown libraries are unavailable.");
+    marked.setOptions({ gfm: true, breaks: true });
+    return { marked, DOMPurify };
+  });
+  return markdownLibraryPromise;
+}
+
+function loadMarkdownComponents() {
+  markdownComponentsPromise ||= import("../components/markdown.js");
+  return markdownComponentsPromise;
+}
 
 export async function renderAllArticles() {
   const params = new URLSearchParams(location.search);
@@ -190,7 +220,15 @@ export async function renderSearch() {
 }
 
 export async function renderDetail(articleId) {
-  const article = await api(`/api/articles/${encodeURIComponent(articleId)}`);
+  const articlePromise = api(`/api/articles/${encodeURIComponent(articleId)}`);
+  const markdownSetupPromise = Promise.all([
+    loadMarkdownLibraries(),
+    loadMarkdownComponents(),
+  ]);
+  const [article, [{ marked, DOMPurify }, markdown]] = await Promise.all([
+    articlePromise,
+    markdownSetupPromise,
+  ]);
   document.title = `${article.title || "無題の記事"} | Qiita Article Search`;
 
   const source = removeDangerousBlocks(article.body || "本文がありません。");
@@ -229,12 +267,12 @@ export async function renderDetail(articleId) {
   document.querySelector("[data-markdown-download]")?.addEventListener("click", () => {
     downloadMarkdown(article);
   });
-  await convertExistingQiitaArticleLinks();
-  renderArticleTree();
-  secureArticleLinks();
-  await renderMermaid();
-  enhanceCodeBlocks();
-  await renderLinkPreviews();
+  await markdown.convertExistingQiitaArticleLinks();
+  markdown.renderArticleTree();
+  markdown.secureArticleLinks();
+  await markdown.renderMermaid();
+  markdown.enhanceCodeBlocks();
+  await markdown.renderLinkPreviews();
 }
 
 function downloadMarkdown(article) {
