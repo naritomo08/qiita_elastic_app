@@ -28,6 +28,40 @@ export async function renderMermaid() {
   }
 }
 
+export function renderArticleTree() {
+  const tree = document.querySelector("[data-article-tree]");
+  if (!tree) return;
+
+  const headings = [...document.querySelectorAll(".markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4")]
+    .filter((heading) => heading.textContent.trim());
+  if (!headings.length) {
+    tree.closest(".article-tree")?.remove();
+    return;
+  }
+
+  const usedIds = new Set();
+  const items = headings.map((heading, index) => {
+    heading.id = uniqueHeadingId(`section-${index + 1}`, usedIds);
+    return {
+      id: heading.id,
+      level: Number(heading.tagName.slice(1)),
+      title: heading.textContent.trim(),
+    };
+  });
+
+  tree.innerHTML = `
+    <p class="article-tree-title">目次</p>
+    <ol class="article-tree-list">
+      ${items.map((item) => `
+        <li style="--tree-level: ${item.level - 1}">
+          <a href="#${encodeURIComponent(item.id)}">${escapeHtml(item.title)}</a>
+        </li>
+      `).join("")}
+    </ol>
+  `;
+  observeArticleTree(headings, tree);
+}
+
 export function enhanceCodeBlocks() {
   document.querySelectorAll(".markdown-body pre").forEach((pre) => {
     if (pre.parentElement?.classList.contains("code-block")) return;
@@ -81,6 +115,45 @@ export function enhanceCodeBlocks() {
       }, 1800);
     });
   });
+}
+
+function uniqueHeadingId(value, usedIds) {
+  const fallback = "section";
+  const base = String(value || fallback)
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\w\u3040-\u30ff\u3400-\u9fff-]/g, "")
+    || fallback;
+  let id = base;
+  let count = 2;
+  while (usedIds.has(id) || document.getElementById(id)) {
+    id = `${base}-${count}`;
+    count += 1;
+  }
+  usedIds.add(id);
+  return id;
+}
+
+function observeArticleTree(headings, tree) {
+  if (!("IntersectionObserver" in window)) return;
+
+  const links = new Map([...tree.querySelectorAll("a[href^='#']")].map((link) => [
+    decodeURIComponent(link.hash.slice(1)),
+    link,
+  ]));
+  const observer = new IntersectionObserver((entries) => {
+    const active = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+    if (!active) return;
+
+    links.forEach((link) => link.classList.remove("is-active"));
+    links.get(active.target.id)?.classList.add("is-active");
+  }, {
+    rootMargin: "-18% 0px -72% 0px",
+    threshold: 0,
+  });
+  headings.forEach((heading) => observer.observe(heading));
 }
 
 async function copyText(value) {

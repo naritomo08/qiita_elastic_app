@@ -15,6 +15,7 @@ import {
 import {
   convertExistingQiitaArticleLinks,
   enhanceCodeBlocks,
+  renderArticleTree,
   renderLinkPreviews,
   renderMermaid,
   secureArticleLinks,
@@ -201,20 +202,27 @@ export async function renderDetail(articleId) {
   app.innerHTML = `
     <article class="article-detail">
       <a class="back-link" href="/" data-route>← 記事一覧へ戻る</a>
-      <header class="detail-header">
-        <p class="eyebrow">QIITA ARTICLE</p>
-        <h1>${escapeHtml(article.title || "無題の記事")}</h1>
-        ${tags(article.tags, true)}
-        <dl class="article-dates">
-          <div><dt>作成</dt><dd>${formatDate(article.created_at)}</dd></div>
-          <div><dt>更新</dt><dd>${formatDate(article.updated_at)}</dd></div>
-        </dl>
-        <div class="detail-actions">
-          <button class="markdown-download-button" type="button" data-markdown-download>Markdownをダウンロード ↓</button>
-          ${article.url ? `<a class="original-link" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
-        </div>
-      </header>
-      <div class="article-body markdown-body">${markdownHtml}</div>
+      <div class="article-detail-layout">
+        <main class="article-detail-main">
+          <header class="detail-header">
+            <p class="eyebrow">QIITA ARTICLE</p>
+            <h1>${escapeHtml(article.title || "無題の記事")}</h1>
+            ${tags(article.tags, true)}
+            <dl class="article-dates">
+              <div><dt>作成</dt><dd>${formatDate(article.created_at)}</dd></div>
+              <div><dt>更新</dt><dd>${formatDate(article.updated_at)}</dd></div>
+            </dl>
+            <div class="detail-actions">
+              <button class="markdown-download-button" type="button" data-markdown-download>Markdownをダウンロード ↓</button>
+              ${article.url ? `<a class="original-link" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
+            </div>
+          </header>
+          <div class="article-body markdown-body">${markdownHtml}</div>
+        </main>
+        <aside class="article-tree" aria-label="記事の目次">
+          <nav data-article-tree></nav>
+        </aside>
+      </div>
     </article>
   `;
 
@@ -222,6 +230,7 @@ export async function renderDetail(articleId) {
     downloadMarkdown(article);
   });
   await convertExistingQiitaArticleLinks();
+  renderArticleTree();
   secureArticleLinks();
   await renderMermaid();
   enhanceCodeBlocks();
