@@ -59,6 +59,7 @@ export function renderArticleTree() {
       `).join("")}
     </ol>
   `;
+  keepArticleTreePositionOnClick(tree);
   observeArticleTree(headings, tree);
 }
 
@@ -154,6 +155,21 @@ function observeArticleTree(headings, tree) {
     threshold: 0,
   });
   headings.forEach((heading) => observer.observe(heading));
+}
+
+function keepArticleTreePositionOnClick(tree) {
+  tree.querySelectorAll("a[href^='#']").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      const target = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+      if (!target) return;
+
+      event.preventDefault();
+      const currentTreeTop = tree.scrollTop;
+      target.scrollIntoView({ block: "start" });
+      history.replaceState(null, "", link.hash);
+      tree.scrollTop = currentTreeTop;
+    });
+  });
 }
 
 async function copyText(value) {
