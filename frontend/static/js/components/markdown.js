@@ -1,18 +1,28 @@
-import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
 import { api, escapeHtml, stripMarkdown } from "../common.js";
 
 const qiitaArticleLinkCache = new Map();
+let mermaidPromise;
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-  theme: "neutral",
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
-  flowchart: { htmlLabels: false, useMaxWidth: true },
-});
+async function loadMermaid() {
+  mermaidPromise ||= import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs")
+    .then(({ default: mermaid }) => {
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "neutral",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
+        flowchart: { htmlLabels: false, useMaxWidth: true },
+      });
+      return mermaid;
+    });
+  return mermaidPromise;
+}
 
 export async function renderMermaid() {
   const blocks = [...document.querySelectorAll(".markdown-body pre > code.language-mermaid")];
+  if (!blocks.length) return;
+
+  const mermaid = await loadMermaid();
   for (const [index, code] of blocks.entries()) {
     const source = code.textContent;
     const diagram = document.createElement("div");
