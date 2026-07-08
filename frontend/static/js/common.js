@@ -26,7 +26,7 @@ export function healthPath(key, suffix = "") {
 }
 
 export function renderError(message) {
-  app.innerHTML = `<section class="error-page"><p class="error-code">APPLICATION ERROR</p><h1>画面を表示できませんでした</h1><p>${escapeHtml(message)}</p><a class="button-secondary" href="/" data-route>トップページへ戻る</a></section>`;
+  app.innerHTML = `<section class="error-page"><p class="error-code">APPLICATION ERROR</p><h1>画面を表示できませんでした</h1><p>${escapeHtml(message)}</p><a class="button-secondary btn btn-outline-secondary" href="/" data-route>トップページへ戻る</a></section>`;
   app.dataset.ready = "true";
 }
 
@@ -49,11 +49,11 @@ export function showPendingBackendNotice() {
 }
 
 export function showNotice(message) {
-  app.insertAdjacentHTML("afterbegin", `<div class="alert alert-warning">${escapeHtml(message)}</div>`);
+  app.insertAdjacentHTML("afterbegin", `<div class="alert alert-warning" role="alert">${escapeHtml(message)}</div>`);
 }
 
 export function emptyState(title, description) {
-  return `<div class="empty-state"><h3>${title}</h3><p>${description}</p></div>`;
+  return `<div class="empty-state"><h3>${title}</h3><p class="mb-0">${description}</p></div>`;
 }
 
 export function formatDate(value) {

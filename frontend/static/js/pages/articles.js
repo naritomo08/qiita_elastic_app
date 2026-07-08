@@ -75,7 +75,7 @@ export async function renderAllArticles() {
     </section>
     <section class="section">
       ${data.results.length ? `
-        <div class="article-grid">${data.results.map((article) => articleCard(article, "created")).join("")}</div>
+        <div class="article-grid row g-3">${data.results.map((article) => articleCard(article, "created")).join("")}</div>
         ${allArticlesPagination(page, size, totalPages)}
       ` : emptyState("記事はまだありません", "Elasticsearchインデックスに記事を投入すると、ここに表示されます。")}
     </section>
@@ -158,7 +158,7 @@ function homeArticleSection(articles, tag) {
         <div class="article-list-controls">
           <span class="article-count">${articles.length.toLocaleString()} 件</span>
           <time datetime="${updatedAt.toISOString()}">${updatedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新</time>
-          <button type="button" data-home-refresh aria-label="記事一覧を更新">
+          <button class="btn btn-outline-success btn-sm" type="button" data-home-refresh aria-label="記事一覧を更新">
             <span aria-hidden="true">↻</span> 更新
           </button>
         </div>
@@ -212,7 +212,7 @@ export async function renderSearch() {
         <strong>${Number(data.total).toLocaleString()}<small> 件</small></strong>
       </div>
       ${data.results.length ? `
-        <div class="result-list">${data.results.map(resultCard).join("")}</div>
+        <div class="result-list d-grid gap-3">${data.results.map(resultCard).join("")}</div>
         ${pagination(q, page, size, totalPages)}
       ` : emptyState("一致する記事がありませんでした", "キーワードを短くするか、別の表記で検索してみてください。")}
     </section>
@@ -251,8 +251,8 @@ export async function renderDetail(articleId) {
               <div><dt>更新</dt><dd>${formatDate(article.updated_at)}</dd></div>
             </dl>
             <div class="detail-actions">
-              <button class="markdown-download-button" type="button" data-markdown-download>Markdownをダウンロード ↓</button>
-              ${article.url ? `<a class="original-link" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
+              <button class="markdown-download-button btn btn-outline-success" type="button" data-markdown-download>Markdownをダウンロード ↓</button>
+              ${article.url ? `<a class="original-link btn btn-success" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiita で元記事を読む ↗</a>` : ""}
             </div>
           </header>
           <div class="article-body markdown-body">${markdownHtml}</div>
@@ -304,21 +304,21 @@ function articleGrid(articles, selectedTag) {
       : emptyState("記事はまだありません", "Elasticsearch インデックスに記事を投入すると、ここに表示されます。");
   }
   const dateField = selectedTag ? "created" : "updated";
-  return `<div class="article-grid">${articles.map((article) => articleCard(article, dateField)).join("")}</div>`;
+  return `<div class="article-grid row g-3">${articles.map((article) => articleCard(article, dateField)).join("")}</div>`;
 }
 
 function articleCard(article, dateField = "updated") {
   const dateLabel = dateField === "created" ? "作成" : "更新";
   const dateValue = dateField === "created" ? article.created_at : article.updated_at;
   return `
-    <article class="article-card">
+    <article class="article-card card h-100">
       <div class="card-meta"><time>${dateLabel} ${formatDate(dateValue)}</time></div>
       <h3><a href="/articles/${encodeURIComponent(article.id)}" data-route>${escapeHtml(article.title || "無題の記事")}</a></h3>
       ${tags(article.tags)}
       <p class="excerpt">${escapeHtml(stripMarkdown(article.body || "").slice(0, 180))}${(article.body || "").length > 180 ? "…" : ""}</p>
       <div class="card-actions">
-        <a class="card-link" href="/articles/${encodeURIComponent(article.id)}" data-route>記事を読む <span>→</span></a>
-        ${article.url ? `<a class="card-link external" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
+        <a class="card-link btn btn-link p-0" href="/articles/${encodeURIComponent(article.id)}" data-route>記事を読む <span>→</span></a>
+        ${article.url ? `<a class="card-link external btn btn-link p-0" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
       </div>
     </article>
   `;
@@ -330,7 +330,7 @@ function resultCard(article) {
     ? article.highlight.body.map((item) => `<p>${sanitizeHighlight(item)}…</p>`).join("")
     : `<p>${escapeHtml(stripMarkdown(article.body || "").slice(0, 240))}</p>`;
   return `
-    <article class="result-card">
+    <article class="result-card card">
       <div class="card-meta">
         <time>更新 ${formatDate(article.updated_at)}</time>
         ${article._score != null ? `<span>score ${Number(article._score).toFixed(2)}</span>` : ""}
@@ -339,8 +339,8 @@ function resultCard(article) {
       ${tags(article.tags)}
       <div class="highlights">${fragments}</div>
       <div class="card-actions">
-        <a class="card-link" href="/articles/${encodeURIComponent(article.id)}" data-route>詳細を見る <span>→</span></a>
-        ${article.url ? `<a class="card-link external" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
+        <a class="card-link btn btn-link p-0" href="/articles/${encodeURIComponent(article.id)}" data-route>詳細を見る <span>→</span></a>
+        ${article.url ? `<a class="card-link external btn btn-link p-0" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
       </div>
     </article>
   `;
@@ -349,7 +349,7 @@ function resultCard(article) {
 function tags(values, large = false) {
   if (!Array.isArray(values) || !values.length) return "";
   return `<div class="tags${large ? " large" : ""}">${values.map((tag) =>
-    `<a class="tag" href="/?tag=${encodeURIComponent(tag)}" data-route data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</a>`
+    `<a class="tag badge rounded-pill text-bg-success-subtle" href="/?tag=${encodeURIComponent(tag)}" data-route data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</a>`
   ).join("")}</div>`;
 }
 
@@ -357,34 +357,38 @@ function searchForm(value, size = 10) {
   return `
     <form class="search-form${value ? " compact" : ""}" data-search-form>
       <label class="sr-only" for="q">検索キーワード</label>
-      <div class="search-box">
+      <div class="search-box input-group">
         <span class="search-icon" aria-hidden="true"></span>
-        <input id="q" name="q" type="search" value="${escapeHtml(value)}" placeholder="例: Elasticsearch, Python, Docker" required>
+        <input id="q" class="form-control" name="q" type="search" value="${escapeHtml(value)}" placeholder="例: Elasticsearch, Python, Docker" required>
         <input type="hidden" name="size" value="${size}">
-        <button type="submit">検索</button>
+        <button class="btn btn-success" type="submit">検索</button>
       </div>
     </form>`;
 }
 
 function pagination(q, page, size, totalPages) {
   if (totalPages <= 1) return "";
-  const link = (target, label) => `<a href="/search?${new URLSearchParams({ q, page: target, size })}" data-route>${label}</a>`;
+  const link = (target, label) => `<li class="page-item"><a class="page-link" href="/search?${new URLSearchParams({ q, page: target, size })}" data-route>${label}</a></li>`;
   return `
-    <nav class="pagination">
-      ${page > 1 ? link(page - 1, "← 前へ") : '<span class="disabled">← 前へ</span>'}
-      <span>${page} / ${totalPages}</span>
-      ${page < totalPages ? link(page + 1, "次へ →") : '<span class="disabled">次へ →</span>'}
+    <nav class="pagination-wrap" aria-label="検索結果のページ送り">
+      <ul class="pagination justify-content-center">
+        ${page > 1 ? link(page - 1, "← 前へ") : '<li class="page-item disabled"><span class="page-link">← 前へ</span></li>'}
+        <li class="page-item disabled"><span class="page-link">${page} / ${totalPages}</span></li>
+        ${page < totalPages ? link(page + 1, "次へ →") : '<li class="page-item disabled"><span class="page-link">次へ →</span></li>'}
+      </ul>
     </nav>`;
 }
 
 function allArticlesPagination(page, size, totalPages) {
   if (totalPages <= 1) return "";
   const link = (target, label) =>
-    `<a href="/all?${new URLSearchParams({ page: target, size })}" data-route>${label}</a>`;
+    `<li class="page-item"><a class="page-link" href="/all?${new URLSearchParams({ page: target, size })}" data-route>${label}</a></li>`;
   return `
-    <nav class="pagination">
-      ${page > 1 ? link(page - 1, "← 前へ") : '<span class="disabled">← 前へ</span>'}
-      <span>${page} / ${totalPages}</span>
-      ${page < totalPages ? link(page + 1, "次へ →") : '<span class="disabled">次へ →</span>'}
+    <nav class="pagination-wrap" aria-label="全記事一覧のページ送り">
+      <ul class="pagination justify-content-center">
+        ${page > 1 ? link(page - 1, "← 前へ") : '<li class="page-item disabled"><span class="page-link">← 前へ</span></li>'}
+        <li class="page-item disabled"><span class="page-link">${page} / ${totalPages}</span></li>
+        ${page < totalPages ? link(page + 1, "次へ →") : '<li class="page-item disabled"><span class="page-link">次へ →</span></li>'}
+      </ul>
     </nav>`;
 }

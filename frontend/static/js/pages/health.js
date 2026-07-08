@@ -28,7 +28,7 @@ export async function renderHealthDashboard() {
           <h1>稼働状況</h1>
           <p>frontendのNginx経由で、各バックエンドとElasticsearchの状態を確認しています。</p>
         </div>
-        <button class="health-refresh-button" type="button" data-health-refresh>
+        <button class="health-refresh-button btn btn-outline-success" type="button" data-health-refresh>
           <span aria-hidden="true">↻</span> 今すぐ更新
         </button>
       </div>
@@ -68,10 +68,10 @@ export async function renderHealthDashboard() {
           </div>
         </div>
         <div class="health-grid health-grid-elasticsearch">
-          <article class="health-card is-checking" data-elasticsearch-health>
+          <article class="health-card card is-checking" data-elasticsearch-health>
             <div class="health-card-top">
               <span class="health-service-icon elasticsearch-icon" aria-hidden="true">E</span>
-              <span class="health-badge">確認中</span>
+              <span class="health-badge badge rounded-pill">確認中</span>
             </div>
             <h3>Elasticsearch</h3>
             <p class="health-message">接続状態を確認しています。</p>
@@ -95,13 +95,13 @@ export async function renderHealthDashboard() {
               <span>対象日</span>
               <input type="date" name="date" value="${accessLogDate}" max="${todayJstDate()}">
             </label>
-            <button class="button-secondary" type="submit">表示</button>
-            <button class="button-secondary" type="button" data-access-log-download disabled>CSVダウンロード</button>
+            <button class="button-secondary btn btn-outline-secondary" type="submit">表示</button>
+            <button class="button-secondary btn btn-outline-secondary" type="button" data-access-log-download disabled>CSVダウンロード</button>
           </form>
         </div>
         <div class="access-log-summary" data-access-log-count>読込中…</div>
-        <div class="access-log-table-wrap">
-          <table class="access-log-table">
+        <div class="access-log-table-wrap table-responsive">
+          <table class="access-log-table table table-hover align-middle mb-0">
             <thead>
               <tr>
                 <th>時刻</th>
@@ -127,10 +127,10 @@ export async function renderHealthDashboard() {
 
 function healthCard(key, backend) {
   return `
-    <article class="health-card is-checking" data-backend-health="${key}">
+    <article class="health-card card is-checking" data-backend-health="${key}">
       <div class="health-card-top">
         <span class="health-service-icon" aria-hidden="true">${escapeHtml(backend.label.slice(0, 1))}</span>
-        <span class="health-badge">確認中</span>
+        <span class="health-badge badge rounded-pill">確認中</span>
       </div>
       <h3>${escapeHtml(backend.label)}</h3>
       <p class="health-message">接続状態を確認しています。</p>
@@ -145,10 +145,10 @@ function healthCard(key, backend) {
 
 function containerHealthCard(service, label, icon) {
   return `
-    <article class="health-card is-checking" data-container-health="${service}">
+    <article class="health-card card is-checking" data-container-health="${service}">
       <div class="health-card-top">
         <span class="health-service-icon" aria-hidden="true">${icon}</span>
-        <span class="health-badge">確認中</span>
+        <span class="health-badge badge rounded-pill">確認中</span>
       </div>
       <h3>${escapeHtml(label)}</h3>
       <p class="health-message">コンテナの稼働状態を確認しています。</p>
