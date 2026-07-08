@@ -6,12 +6,39 @@
     <meta name="description" content="Elasticsearch で Qiita の技術記事を検索するアプリ">
     <title>Qiita Article Search</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+      window.tailwind = {
+        config: {
+          corePlugins: { preflight: false },
+          theme: {
+            extend: {
+              colors: {
+                qiita: {
+                  bg: "#f4f7f5",
+                  surface: "#ffffff",
+                  text: "#17231d",
+                  muted: "#64716a",
+                  line: "#dce5df",
+                  green: "#2f9b5f",
+                  dark: "#197445",
+                  light: "#e4f4ea"
+                }
+              },
+              boxShadow: {
+                soft: "0 12px 36px rgba(19, 58, 36, 0.08)"
+              }
+            }
+          }
+        }
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
   </head>
-  <body>
-    <header class="site-header">
+  <body class="bg-qiita-bg text-qiita-text antialiased">
+    <header class="site-header sticky top-0 z-20">
       <div class="container header-inner">
-        <a class="brand" href="/" data-route>
-          <span class="brand-mark">Q</span>
+        <a class="brand transition hover:text-qiita-dark" href="/" data-route>
+          <span class="brand-mark shadow-lg shadow-green-700/20">Q</span>
           <span>
             <strong>Qiita Article Search</strong>
             <small>Powered by Elasticsearch</small>
@@ -20,7 +47,7 @@
         <nav class="header-nav">
           <label class="backend-selector">
             <span>Backend</span>
-            <select id="backend-select" aria-label="利用するバックエンド">
+            <select id="backend-select" class="transition hover:border-qiita-green focus:border-qiita-green focus:outline-none focus:ring-2 focus:ring-qiita-green/20" aria-label="利用するバックエンド">
               <option value="python">Python</option>
               <option value="elixir">Elixir</option>
               <option value="php">PHP</option>
@@ -29,8 +56,8 @@
               <option value="ruby">Ruby</option>
             </select>
           </label>
-          <a class="all-articles-link" href="/all" data-route>全記事一覧</a>
-          <a class="health-link" href="/health" data-route>稼働状況</a>
+          <a class="all-articles-link transition hover:text-qiita-green" href="/all" data-route>全記事一覧</a>
+          <a class="health-link transition hover:text-qiita-dark" href="/health" data-route>稼働状況</a>
         </nav>
       </div>
     </header>

@@ -24,15 +24,15 @@ export async function renderHealthDashboard() {
     <section class="health-page">
       <div class="health-page-header">
         <div>
-          <p class="eyebrow">SYSTEM HEALTH</p>
+          <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">SYSTEM HEALTH</p>
           <h1>稼働状況</h1>
-          <p>frontendのNginx経由で、各バックエンドとElasticsearchの状態を確認しています。</p>
+          <p class="text-qiita-muted">frontendのNginx経由で、各バックエンドとElasticsearchの状態を確認しています。</p>
         </div>
-        <button class="health-refresh-button" type="button" data-health-refresh>
+        <button class="health-refresh-button transition hover:border-qiita-green hover:bg-qiita-light disabled:opacity-60" type="button" data-health-refresh>
           <span aria-hidden="true">↻</span> 今すぐ更新
         </button>
       </div>
-      <div class="health-summary" aria-live="polite">
+      <div class="health-summary border-qiita-line bg-white shadow-sm" aria-live="polite">
         <span class="health-summary-dot is-checking"></span>
         <strong data-health-summary>確認中…</strong>
         <time data-health-updated></time>
@@ -40,7 +40,7 @@ export async function renderHealthDashboard() {
       <section class="health-section">
         <div class="health-section-heading">
           <div>
-            <p class="eyebrow">FRONTEND</p>
+            <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">FRONTEND</p>
             <h2>フロントエンドコンテナ</h2>
           </div>
         </div>
@@ -51,7 +51,7 @@ export async function renderHealthDashboard() {
       <section class="health-section">
         <div class="health-section-heading">
           <div>
-            <p class="eyebrow">BACKENDS</p>
+            <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">BACKENDS</p>
             <h2>バックエンドコンテナ</h2>
           </div>
           <span>5秒ごとに自動更新</span>
@@ -63,12 +63,12 @@ export async function renderHealthDashboard() {
       <section class="health-section">
         <div class="health-section-heading">
           <div>
-            <p class="eyebrow">DATA STORE</p>
+            <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">DATA STORE</p>
             <h2>Elasticsearch</h2>
           </div>
         </div>
         <div class="health-grid health-grid-elasticsearch">
-          <article class="health-card is-checking" data-elasticsearch-health>
+          <article class="health-card is-checking border-qiita-line bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft" data-elasticsearch-health>
             <div class="health-card-top">
               <span class="health-service-icon elasticsearch-icon" aria-hidden="true">E</span>
               <span class="health-badge">確認中</span>
@@ -86,17 +86,17 @@ export async function renderHealthDashboard() {
       <section class="health-section">
         <div class="health-section-heading">
           <div>
-            <p class="eyebrow">OBSERVABILITY</p>
+            <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">OBSERVABILITY</p>
             <h2>アクセスログ</h2>
             <p class="health-section-description">監視リクエストと静的ファイルを除いた、実際のブラウザ操作を表示します。</p>
           </div>
           <form class="access-log-controls" data-access-log-form>
             <label>
               <span>対象日</span>
-              <input type="date" name="date" value="${accessLogDate}" max="${todayJstDate()}">
+              <input class="transition focus:border-qiita-green focus:outline-none focus:ring-2 focus:ring-qiita-green/20" type="date" name="date" value="${accessLogDate}" max="${todayJstDate()}">
             </label>
-            <button class="button-secondary" type="submit">表示</button>
-            <button class="button-secondary" type="button" data-access-log-download disabled>CSVダウンロード</button>
+            <button class="button-secondary transition hover:border-qiita-green hover:bg-qiita-light" type="submit">表示</button>
+            <button class="button-secondary transition hover:border-qiita-green hover:bg-qiita-light disabled:opacity-60" type="button" data-access-log-download disabled>CSVダウンロード</button>
           </form>
         </div>
         <div class="access-log-summary" data-access-log-count>読込中…</div>
@@ -127,7 +127,7 @@ export async function renderHealthDashboard() {
 
 function healthCard(key, backend) {
   return `
-    <article class="health-card is-checking" data-backend-health="${key}">
+    <article class="health-card is-checking border-qiita-line bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft" data-backend-health="${key}">
       <div class="health-card-top">
         <span class="health-service-icon" aria-hidden="true">${escapeHtml(backend.label.slice(0, 1))}</span>
         <span class="health-badge">確認中</span>
@@ -145,7 +145,7 @@ function healthCard(key, backend) {
 
 function containerHealthCard(service, label, icon) {
   return `
-    <article class="health-card is-checking" data-container-health="${service}">
+    <article class="health-card is-checking border-qiita-line bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft" data-container-health="${service}">
       <div class="health-card-top">
         <span class="health-service-icon" aria-hidden="true">${icon}</span>
         <span class="health-badge">確認中</span>

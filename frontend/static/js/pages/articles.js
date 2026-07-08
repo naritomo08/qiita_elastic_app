@@ -64,13 +64,13 @@ export async function renderAllArticles() {
 
   app.innerHTML = `
     <section class="all-articles-header">
-      <p class="eyebrow">ALL ARTICLES</p>
+      <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">ALL ARTICLES</p>
       <div class="results-summary">
         <div>
           <h1>全記事一覧</h1>
-          <p class="all-articles-copy">Elasticsearchに登録されている記事を作成日順で表示しています。</p>
+          <p class="all-articles-copy text-qiita-muted">Elasticsearchに登録されている記事を作成日順で表示しています。</p>
         </div>
-        <strong>${Number(data.total).toLocaleString()}<small> 件</small></strong>
+        <strong class="text-qiita-dark">${Number(data.total).toLocaleString()}<small> 件</small></strong>
       </div>
     </section>
     <section class="section">
@@ -90,10 +90,10 @@ export async function renderHome() {
 
   app.innerHTML = `
     <section class="hero">
-      <p class="eyebrow">TECH ARTICLE DISCOVERY</p>
-      <h1>知りたい技術を、<br>すばやく見つける。</h1>
-      <p class="hero-copy">Elasticsearch に登録された Qiita 記事を、タイトル・本文・タグから横断検索できます。</p>
-      <div class="article-total" aria-label="現在の記事総数">
+      <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">TECH ARTICLE DISCOVERY</p>
+      <h1 class="font-extrabold text-qiita-text">知りたい技術を、<br>すばやく見つける。</h1>
+      <p class="hero-copy text-qiita-muted">Elasticsearch に登録された Qiita 記事を、タイトル・本文・タグから横断検索できます。</p>
+      <div class="article-total border-qiita-green/30 bg-white/80 shadow-soft" aria-label="現在の記事総数">
         <span>現在の記事総数</span>
         <strong data-home-total>${total.toLocaleString("ja-JP")}<small> 件</small></strong>
       </div>
@@ -152,19 +152,19 @@ function homeArticleSection(articles, tag) {
     <section class="section" id="home-articles">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">${tag ? "TAG FILTER" : "RECENTLY UPDATED"}</p>
+          <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">${tag ? "TAG FILTER" : "RECENTLY UPDATED"}</p>
           <h2>${tag ? `「${escapeHtml(tag)}」の記事` : "最近更新された記事"}</h2>
         </div>
         <div class="article-list-controls">
           <span class="article-count">${articles.length.toLocaleString()} 件</span>
           <time datetime="${updatedAt.toISOString()}">${updatedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新</time>
-          <button type="button" data-home-refresh aria-label="記事一覧を更新">
+          <button class="transition hover:border-qiita-green hover:bg-qiita-light disabled:opacity-60" type="button" data-home-refresh aria-label="記事一覧を更新">
             <span aria-hidden="true">↻</span> 更新
           </button>
         </div>
       </div>
       ${tag ? `
-        <div class="active-filter">
+        <div class="active-filter border-qiita-green/30 bg-qiita-light">
           <span>タグで絞り込み中</span>
           <strong>${escapeHtml(tag)}</strong>
           <span class="filter-result-count">表示件数 <strong>${articles.length.toLocaleString()} 件</strong></span>
@@ -206,10 +206,10 @@ export async function renderSearch() {
     <section class="section search-results">
       <div class="results-summary">
         <div>
-          <p class="eyebrow">SEARCH RESULTS</p>
+          <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">SEARCH RESULTS</p>
           <h1>「${escapeHtml(q)}」の検索結果</h1>
         </div>
-        <strong>${Number(data.total).toLocaleString()}<small> 件</small></strong>
+        <strong class="text-qiita-dark">${Number(data.total).toLocaleString()}<small> 件</small></strong>
       </div>
       ${data.results.length ? `
         <div class="result-list">${data.results.map(resultCard).join("")}</div>
@@ -243,7 +243,7 @@ export async function renderDetail(articleId) {
       <div class="article-detail-layout">
         <main class="article-detail-main">
           <header class="detail-header">
-            <p class="eyebrow">QIITA ARTICLE</p>
+            <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">QIITA ARTICLE</p>
             <h1>${escapeHtml(article.title || "無題の記事")}</h1>
             ${tags(article.tags, true)}
             <dl class="article-dates">
@@ -311,7 +311,7 @@ function articleCard(article, dateField = "updated") {
   const dateLabel = dateField === "created" ? "作成" : "更新";
   const dateValue = dateField === "created" ? article.created_at : article.updated_at;
   return `
-    <article class="article-card">
+    <article class="article-card border-qiita-line bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-qiita-green/50 hover:shadow-soft">
       <div class="card-meta"><time>${dateLabel} ${formatDate(dateValue)}</time></div>
       <h3><a href="/articles/${encodeURIComponent(article.id)}" data-route>${escapeHtml(article.title || "無題の記事")}</a></h3>
       ${tags(article.tags)}
@@ -330,7 +330,7 @@ function resultCard(article) {
     ? article.highlight.body.map((item) => `<p>${sanitizeHighlight(item)}…</p>`).join("")
     : `<p>${escapeHtml(stripMarkdown(article.body || "").slice(0, 240))}</p>`;
   return `
-    <article class="result-card">
+    <article class="result-card border-qiita-line bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-qiita-green/50 hover:shadow-soft">
       <div class="card-meta">
         <time>更新 ${formatDate(article.updated_at)}</time>
         ${article._score != null ? `<span>score ${Number(article._score).toFixed(2)}</span>` : ""}
@@ -349,7 +349,7 @@ function resultCard(article) {
 function tags(values, large = false) {
   if (!Array.isArray(values) || !values.length) return "";
   return `<div class="tags${large ? " large" : ""}">${values.map((tag) =>
-    `<a class="tag" href="/?tag=${encodeURIComponent(tag)}" data-route data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</a>`
+    `<a class="tag bg-qiita-light text-qiita-dark transition hover:-translate-y-0.5 hover:bg-qiita-dark hover:text-white" href="/?tag=${encodeURIComponent(tag)}" data-route data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</a>`
   ).join("")}</div>`;
 }
 
@@ -357,11 +357,11 @@ function searchForm(value, size = 10) {
   return `
     <form class="search-form${value ? " compact" : ""}" data-search-form>
       <label class="sr-only" for="q">検索キーワード</label>
-      <div class="search-box">
+      <div class="search-box border-qiita-line bg-white shadow-soft focus-within:border-qiita-green focus-within:ring-4 focus-within:ring-qiita-green/15">
         <span class="search-icon" aria-hidden="true"></span>
         <input id="q" name="q" type="search" value="${escapeHtml(value)}" placeholder="例: Elasticsearch, Python, Docker" required>
         <input type="hidden" name="size" value="${size}">
-        <button type="submit">検索</button>
+        <button class="bg-qiita-green transition hover:-translate-y-0.5 hover:bg-qiita-dark" type="submit">検索</button>
       </div>
     </form>`;
 }
