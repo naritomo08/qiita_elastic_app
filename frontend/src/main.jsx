@@ -77,14 +77,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const navigation = performance.getEntriesByType("navigation")[0];
-    const isReload = navigation ? navigation.type === "reload" : performance.navigation?.type === 1;
-    if (isReload && (window.location.pathname !== "/" || window.location.search || window.location.hash)) {
-      navigate("/", { replace: true });
-    }
-  }, [navigate]);
-
-  useEffect(() => {
     refreshBackends();
     const timer = window.setInterval(refreshBackends, BACKEND_CHECK_INTERVAL);
     return () => window.clearInterval(timer);
@@ -524,11 +516,11 @@ function ArticleCard({ article, dateField = "updated", navigate }) {
   return (
     <article className="article-card">
       <div className="card-meta"><time>{dateLabel} {formatDate(dateValue)}</time></div>
-      <h3><a href={`/articles/${encodeURIComponent(article.id)}`} onClick={routeClick(navigate)}>{article.title || "無題の記事"}</a></h3>
+      <h3><a href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">{article.title || "無題の記事"}</a></h3>
       <Tags navigate={navigate} tags={article.tags} />
       <p className="excerpt">{stripMarkdown(article.body || "").slice(0, 180)}{(article.body || "").length > 180 ? "…" : ""}</p>
       <div className="card-actions">
-        <a className="card-link" href={`/articles/${encodeURIComponent(article.id)}`} onClick={routeClick(navigate)}>記事を読む <span>→</span></a>
+        <a className="card-link" href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">記事を読む <span>→</span></a>
         {article.url && <a className="card-link external" href={safeExternalUrl(article.url)} target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>}
       </div>
     </article>
@@ -544,13 +536,13 @@ function ResultCard({ article, navigate }) {
         <time>更新 {formatDate(article.updated_at)}</time>
         {article._score != null && <span>score {Number(article._score).toFixed(2)}</span>}
       </div>
-      <h2><a href={`/articles/${encodeURIComponent(article.id)}`} onClick={routeClick(navigate)} dangerouslySetInnerHTML={{ __html: sanitizeHighlight(highlightedTitle) }} /></h2>
+      <h2><a href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer" dangerouslySetInnerHTML={{ __html: sanitizeHighlight(highlightedTitle) }} /></h2>
       <Tags navigate={navigate} tags={article.tags} />
       <div className="highlights">
         {fragments.map((item, index) => <p dangerouslySetInnerHTML={{ __html: `${sanitizeHighlight(item)}${article.highlight?.body?.length ? "…" : ""}` }} key={index} />)}
       </div>
       <div className="card-actions">
-        <a className="card-link" href={`/articles/${encodeURIComponent(article.id)}`} onClick={routeClick(navigate)}>詳細を見る <span>→</span></a>
+        <a className="card-link" href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">詳細を見る <span>→</span></a>
         {article.url && <a className="card-link external" href={safeExternalUrl(article.url)} target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>}
       </div>
     </article>
