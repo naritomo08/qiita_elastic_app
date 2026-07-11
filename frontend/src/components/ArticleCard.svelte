@@ -12,11 +12,11 @@
 
 <article class="article-card">
   <div class="card-meta"><time>{dateLabel} {formatDate(dateValue)}</time></div>
-  <h3><a href={`/articles/${encodeURIComponent(article.id)}`} data-route>{article.title || "無題の記事"}</a></h3>
+  <h3><a href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">{article.title || "無題の記事"}</a></h3>
   <Tags values={article.tags} />
   <p class="excerpt">{excerpt}{(article.body || "").length > 180 ? "…" : ""}</p>
   <div class="card-actions">
-    <a class="card-link" href={`/articles/${encodeURIComponent(article.id)}`} data-route>記事を読む <span>→</span></a>
+    <a class="card-link" href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">記事を読む <span>→</span></a>
     {#if article.url}
       <a class="card-link external" href={safeUrl(article.url)} target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>
     {/if}

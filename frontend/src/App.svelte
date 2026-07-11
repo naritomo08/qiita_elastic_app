@@ -53,13 +53,6 @@
       window.scrollTo({ top: 0 });
     };
 
-    const navigation = performance.getEntriesByType("navigation")[0];
-    const isReload = navigation ? navigation.type === "reload" : performance.navigation?.type === 1;
-    if (isReload && (location.pathname !== "/" || location.search || location.hash)) {
-      history.replaceState({}, "", "/");
-      route = currentRoute();
-    }
-
     addEventListener("popstate", onPopState);
 
     refreshBackends().finally(() => {

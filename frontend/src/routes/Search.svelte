@@ -59,7 +59,7 @@
             <time>更新 {formatDate(article.updated_at)}</time>
             {#if article._score != null}<span>score {Number(article._score).toFixed(2)}</span>{/if}
           </div>
-          <h2><a href={`/articles/${encodeURIComponent(article.id)}`} data-route>{@html sanitizeHighlight(article.highlight?.title?.[0]) || (article.title || "無題の記事")}</a></h2>
+          <h2><a href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">{@html sanitizeHighlight(article.highlight?.title?.[0]) || (article.title || "無題の記事")}</a></h2>
           <Tags values={article.tags} />
           <div class="highlights">
             {#if article.highlight?.body?.length}
@@ -71,7 +71,7 @@
             {/if}
           </div>
           <div class="card-actions">
-            <a class="card-link" href={`/articles/${encodeURIComponent(article.id)}`} data-route>詳細を見る <span>→</span></a>
+            <a class="card-link" href={`/articles/${encodeURIComponent(article.id)}`} target="_blank" rel="noopener noreferrer">詳細を見る <span>→</span></a>
             {#if article.url}
               <a class="card-link external" href={safeUrl(article.url)} target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>
             {/if}
