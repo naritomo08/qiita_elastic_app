@@ -313,12 +313,12 @@ function articleCard(article, dateField = "updated") {
   return `
     <article class="article-card card h-100">
       <div class="card-meta"><time>${dateLabel} ${formatDate(dateValue)}</time></div>
-      <h3><a href="/articles/${encodeURIComponent(article.id)}" data-route>${escapeHtml(article.title || "無題の記事")}</a></h3>
+      <h3><a href="/articles/${encodeURIComponent(article.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(article.title || "無題の記事")}</a></h3>
       ${tags(article.tags)}
       <p class="excerpt">${escapeHtml(stripMarkdown(article.body || "").slice(0, 180))}${(article.body || "").length > 180 ? "…" : ""}</p>
       <div class="card-actions">
-        <a class="card-link btn btn-link p-0" href="/articles/${encodeURIComponent(article.id)}" data-route>記事を読む <span>→</span></a>
-        ${article.url ? `<a class="card-link external btn btn-link p-0" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
+        <a class="card-link" href="/articles/${encodeURIComponent(article.id)}" target="_blank" rel="noopener noreferrer">記事を読む <span>↗</span></a>
+        ${article.url ? `<a class="card-link external" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
       </div>
     </article>
   `;
@@ -335,12 +335,12 @@ function resultCard(article) {
         <time>更新 ${formatDate(article.updated_at)}</time>
         ${article._score != null ? `<span>score ${Number(article._score).toFixed(2)}</span>` : ""}
       </div>
-      <h2><a href="/articles/${encodeURIComponent(article.id)}" data-route>${highlightedTitle}</a></h2>
+      <h2><a href="/articles/${encodeURIComponent(article.id)}" target="_blank" rel="noopener noreferrer">${highlightedTitle}</a></h2>
       ${tags(article.tags)}
       <div class="highlights">${fragments}</div>
       <div class="card-actions">
-        <a class="card-link btn btn-link p-0" href="/articles/${encodeURIComponent(article.id)}" data-route>詳細を見る <span>→</span></a>
-        ${article.url ? `<a class="card-link external btn btn-link p-0" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
+        <a class="card-link" href="/articles/${encodeURIComponent(article.id)}" target="_blank" rel="noopener noreferrer">詳細を見る <span>↗</span></a>
+        ${article.url ? `<a class="card-link external" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Qiitaで読む <span>↗</span></a>` : ""}
       </div>
     </article>
   `;
