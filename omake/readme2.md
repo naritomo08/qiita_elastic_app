@@ -16,9 +16,8 @@ hive_prod.logs.nginx_access_curated
 
 ## Iceberg テーブル作成
 
-```sql
-%spark.sql
-
+```bash
+sudo -u spark /usr/local/bin/spark-sql-iceberg <<'EOF'
 CREATE TABLE hive_prod.logs.nginx_access_curated (
   event_time timestamp,
   host string,
@@ -42,6 +41,7 @@ TBLPROPERTIES (
   'format-version'='2',
   'write.distribution-mode'='hash'
 );
+EOF
 ```
 
 ---
