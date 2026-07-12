@@ -73,7 +73,7 @@ EOF
 ```
 
 ```bash
-tee /opt/iceberg/bin/load_nginx_access_to_iceberg.sh <<'EOF'
+sudo tee /opt/iceberg/bin/load_nginx_access_to_iceberg.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -96,10 +96,14 @@ extract_last_integer() {
   awk '
     {
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
-      if ($0 ~ /^[0-9]+$/) val=$0
+      if ($0 ~ /^[0-9]+$/) {
+        val=$0
+      }
     }
     END {
-      if (val == "") exit 1
+      if (val == "") {
+        exit 1
+      }
       print val
     }
   '
@@ -107,7 +111,8 @@ extract_last_integer() {
 
 run_spark_count() {
   local sql="$1"
-  local out rc
+  local out
+  local rc
 
   set +e
   out=$(${SPARK_SQL} 2>&1 <<SQL
@@ -126,7 +131,9 @@ SQL
   printf '%s\n' "${out}" | extract_last_integer
 }
 
-log "nginx access reload start dt=${DT} program_like=${PROGRAM_LIKE}"
+log "nginx access reload start"
+log "source_dt=${DT}"
+log "program_like=${PROGRAM_LIKE}"
 log "src_table=${SRC_TABLE}"
 log "dst_table=${DST_TABLE}"
 
@@ -157,27 +164,42 @@ WHERE dt = DATE '${DT}'
   AND container_name LIKE '${PROGRAM_LIKE}';
 
 INSERT INTO ${DST_TABLE}
-WITH src AS (
+WITH parsed AS (
   SELECT
     host,
     program AS container_name,
     msg AS raw_msg,
-    get_json_object(msg, '$.time') AS json_time,
-    get_json_object(msg, '$.remote_addr') AS remote_addr,
-    get_json_object(msg, '$.method') AS method,
-    get_json_object(msg, '$.uri') AS uri,
-    get_json_object(msg, '$.status') AS status,
-    get_json_object(msg, '$.body_bytes_sent') AS body_bytes_sent,
-    get_json_object(msg, '$.request_time') AS request_time,
-    get_json_object(msg, '$.upstream_addr') AS upstream_addr,
-    get_json_object(msg, '$.user_agent') AS user_agent
+
+    get_json_object(trim(msg), '$.time') AS json_time,
+    get_json_object(trim(msg), '$.remote_addr') AS remote_addr,
+    get_json_object(trim(msg), '$.method') AS method,
+    get_json_object(trim(msg), '$.uri') AS uri,
+    get_json_object(trim(msg), '$.status') AS status,
+    get_json_object(trim(msg), '$.body_bytes_sent') AS body_bytes_sent,
+    get_json_object(trim(msg), '$.request_time') AS request_time,
+    get_json_object(trim(msg), '$.upstream_addr') AS upstream_addr,
+    get_json_object(trim(msg), '$.user_agent') AS user_agent
   FROM ${SRC_TABLE}
   WHERE dt = DATE '${DT}'
     AND program LIKE '${PROGRAM_LIKE}'
     AND get_json_object(trim(msg), '$.time') IS NOT NULL
+),
+converted AS (
+  SELECT
+    *,
+    to_timestamp(json_time) AS event_time_fixed
+  FROM parsed
+),
+src AS (
+  SELECT *
+  FROM converted
+  WHERE event_time_fixed IS NOT NULL
+
+    -- syslog側の日付とアクセスログ内timeの日付が同じものだけ採用
+    AND CAST(event_time_fixed AS DATE) = DATE '${DT}'
 )
 SELECT
-  to_timestamp(json_time) AS event_time,
+  event_time_fixed AS event_time,
   host,
   container_name,
   remote_addr,
@@ -189,8 +211,8 @@ SELECT
   upstream_addr,
   user_agent,
   raw_msg,
-  CAST(to_timestamp(json_time) AS DATE) AS dt,
-  HOUR(to_timestamp(json_time)) AS hr
+  CAST(event_time_fixed AS DATE) AS dt,
+  HOUR(event_time_fixed) AS hr
 FROM src;
 SQL
 
@@ -198,17 +220,60 @@ log "nginx access reload done dt=${DT}"
 log "start count check dt=${DT}"
 
 SRC_COUNT="$(run_spark_count "
+WITH parsed AS (
+  SELECT
+    to_timestamp(
+      get_json_object(trim(msg), '\$.time')
+    ) AS event_time_fixed
+  FROM ${SRC_TABLE}
+  WHERE dt = DATE '${DT}'
+    AND program LIKE '${PROGRAM_LIKE}'
+    AND get_json_object(trim(msg), '\$.time') IS NOT NULL
+)
 SELECT COUNT(*)
-FROM ${SRC_TABLE}
-WHERE dt = DATE '${DT}'
-  AND program LIKE '${PROGRAM_LIKE}'
-  AND get_json_object(trim(msg), '$.time') IS NOT NULL;
+FROM parsed
+WHERE event_time_fixed IS NOT NULL
+  AND CAST(event_time_fixed AS DATE) = DATE '${DT}';
 ")"
 
 DST_COUNT="$(run_spark_count "
 SELECT COUNT(*)
 FROM ${DST_TABLE}
-WHERE dt = DATE '${DT}';
+WHERE dt = DATE '${DT}'
+  AND container_name LIKE '${PROGRAM_LIKE}';
+")"
+
+EXCLUDED_CROSS_DAY_COUNT="$(run_spark_count "
+WITH parsed AS (
+  SELECT
+    to_timestamp(
+      get_json_object(trim(msg), '\$.time')
+    ) AS event_time_fixed
+  FROM ${SRC_TABLE}
+  WHERE dt = DATE '${DT}'
+    AND program LIKE '${PROGRAM_LIKE}'
+    AND get_json_object(trim(msg), '\$.time') IS NOT NULL
+)
+SELECT COUNT(*)
+FROM parsed
+WHERE event_time_fixed IS NOT NULL
+  AND CAST(event_time_fixed AS DATE) <> DATE '${DT}';
+")"
+
+EXCLUDED_INVALID_TIME_COUNT="$(run_spark_count "
+WITH parsed AS (
+  SELECT
+    to_timestamp(
+      get_json_object(trim(msg), '\$.time')
+    ) AS event_time_fixed
+  FROM ${SRC_TABLE}
+  WHERE dt = DATE '${DT}'
+    AND program LIKE '${PROGRAM_LIKE}'
+    AND get_json_object(trim(msg), '\$.time') IS NOT NULL
+)
+SELECT COUNT(*)
+FROM parsed
+WHERE event_time_fixed IS NULL;
 ")"
 
 DIFF=$((DST_COUNT - SRC_COUNT))
@@ -216,6 +281,8 @@ DIFF=$((DST_COUNT - SRC_COUNT))
 log "src_count=${SRC_COUNT}"
 log "dst_count=${DST_COUNT}"
 log "diff=${DIFF}"
+log "excluded_cross_day_count=${EXCLUDED_CROSS_DAY_COUNT}"
+log "excluded_invalid_time_count=${EXCLUDED_INVALID_TIME_COUNT}"
 
 if [ "${SRC_COUNT}" != "${DST_COUNT}" ]; then
   err "nginx access count mismatch dt=${DT} src=${SRC_COUNT} dst=${DST_COUNT}"
@@ -226,7 +293,7 @@ log "OK nginx access count matched dt=${DT}"
 log "nginx access reload finished dt=${DT}"
 EOF
 
-chmod 755 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh
+sudo chmod 755 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh
 ```
 
 ---
