@@ -16,9 +16,8 @@ hive_prod.logs.nginx_access_curated
 
 ## Iceberg テーブル作成
 
-```sql
-%spark.sql
-
+```bash
+sudo -u spark /usr/local/bin/spark-sql-iceberg <<'EOF'
 CREATE TABLE hive_prod.logs.nginx_access_curated (
   event_time timestamp,
   host string,
@@ -42,6 +41,7 @@ TBLPROPERTIES (
   'format-version'='2',
   'write.distribution-mode'='hash'
 );
+EOF
 ```
 
 ---
@@ -73,6 +73,7 @@ TBLPROPERTIES (
 ```
 
 ```bash
+tee /opt/iceberg/bin/load_nginx_access_to_iceberg.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -173,8 +174,7 @@ WITH src AS (
   FROM ${SRC_TABLE}
   WHERE dt = DATE '${DT}'
     AND program LIKE '${PROGRAM_LIKE}'
-    AND msg LIKE '{%'
-    AND get_json_object(msg, '$.time') IS NOT NULL
+    AND get_json_object(trim(msg), '$.time') IS NOT NULL
 )
 SELECT
   to_timestamp(json_time) AS event_time,
@@ -202,8 +202,7 @@ SELECT COUNT(*)
 FROM ${SRC_TABLE}
 WHERE dt = DATE '${DT}'
   AND program LIKE '${PROGRAM_LIKE}'
-  AND msg LIKE '{%'
-  AND get_json_object(msg, '$.time') IS NOT NULL;
+  AND get_json_object(trim(msg), '$.time') IS NOT NULL;
 ")"
 
 DST_COUNT="$(run_spark_count "
@@ -225,6 +224,9 @@ fi
 
 log "OK nginx access count matched dt=${DT}"
 log "nginx access reload finished dt=${DT}"
+EOF
+
+chmod 755 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh
 ```
 
 ---
