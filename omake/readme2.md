@@ -237,6 +237,8 @@ TARGET_DATE="2026-06-20"
 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" qiita-search-frontend
 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" elastic-search-frontend
 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" trino-search-frontend
+/opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" tubu-frontend
+/opt/iceberg/bin/load_nginx_access_to_iceberg.sh "${TARGET_DATE}" tubustg-frontend
 ```
 
 ---
@@ -277,4 +279,256 @@ LIMIT 20;
 30 1 * * * /opt/iceberg/bin/load_nginx_access_to_iceberg.sh $(date -d 'yesterday' +\%F) qiita-search-frontend
 35 1 * * * /opt/iceberg/bin/load_nginx_access_to_iceberg.sh $(date -d 'yesterday' +\%F) elastic-search-frontend
 40 1 * * * /opt/iceberg/bin/load_nginx_access_to_iceberg.sh $(date -d 'yesterday' +\%F) trino-search-frontend
+```
+
+---
+
+## メンテナンスシェル更新
+
+```bash
+tee /opt/iceberg/bin/compact_iceberg.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
+CATALOG="${CATALOG:-hive_prod}"
+DB="${DB:-logs}"
+LOG_DIR="${LOG_DIR:-/tmp}"
+LOG_FILE="${LOG_DIR}/compact_iceberg.log"
+
+TABLES=(
+  "syslog_iceberg"
+  "authlog_iceberg"
+  "nginx_access_curated"
+)
+
+mkdir -p "${LOG_DIR}"
+
+log() {
+  local msg="[INFO] $(date '+%F %T') $*"
+  echo "${msg}"
+  echo "${msg}" >> "${LOG_FILE}" 2>/dev/null || true
+}
+
+err() {
+  local msg="[ERROR] $(date '+%F %T') $*"
+  echo "${msg}" >&2
+  echo "${msg}" >> "${LOG_FILE}" 2>/dev/null || true
+}
+
+run_sql() {
+  local sql="$1"
+  bash -lc "${SPARK_SQL} <<SQL
+${sql}
+SQL
+"
+}
+
+log "START compact iceberg tables"
+
+for tbl in "${TABLES[@]}"; do
+  log "rewrite_data_files start: ${CATALOG}.${DB}.${tbl}"
+  if run_sql "
+CALL ${CATALOG}.system.rewrite_data_files(
+  table => '${DB}.${tbl}'
+);
+" >> "${LOG_FILE}" 2>&1; then
+    log "rewrite_data_files done : ${CATALOG}.${DB}.${tbl}"
+  else
+    err "rewrite_data_files failed: ${CATALOG}.${DB}.${tbl}"
+  fi
+done
+
+log "END compact iceberg tables"
+EOF
+
+chmod 755 /opt/iceberg/bin/compact_iceberg.sh
+```
+
+```bash
+tee /opt/iceberg/bin/expire_iceberg.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+DT="${1:-$(date -d '14 days ago' '+%F 00:00:00')}"
+SNAP="${SNAP:-$(date -d '1 days ago' '+%F 00:00:00')}"
+SPARK_SQL="sudo -u spark /usr/local/bin/spark-sql-iceberg"
+
+echo "[INFO] daily cleanup start dt=${DT} snap=${SNAP}"
+
+${SPARK_SQL} <<SQL
+DELETE FROM hive_prod.logs.syslog_iceberg
+WHERE dt < DATE '${DT}';
+SQL
+
+${SPARK_SQL} <<SQL
+DELETE FROM hive_prod.logs.authlog_iceberg
+WHERE dt < DATE '${DT}';
+SQL
+
+${SPARK_SQL} <<SQL
+DELETE FROM hive_prod.logs.nginx_access_curated
+WHERE dt < DATE '${DT}';
+SQL
+
+${SPARK_SQL} <<SQL
+CALL hive_prod.system.expire_snapshots(
+  table => 'logs.syslog_iceberg',
+  older_than => TIMESTAMP '${SNAP}',
+  clean_expired_metadata => true
+);
+SQL
+
+${SPARK_SQL} <<SQL
+CALL hive_prod.system.expire_snapshots(
+  table => 'logs.authlog_iceberg',
+  older_than => TIMESTAMP '${SNAP}',
+  clean_expired_metadata => true
+);
+SQL
+
+${SPARK_SQL} <<SQL
+CALL hive_prod.system.expire_snapshots(
+  table => 'logs.nginx_access_curated',
+  older_than => TIMESTAMP '${SNAP}',
+  clean_expired_metadata => true
+);
+SQL
+
+echo "[INFO] daily cleanup done dt=${DT} snap=${SNAP}"
+EOF
+
+chmod 755 /opt/iceberg/bin/expire_iceberg.sh
+```
+
+```bash
+tee /opt/iceberg/bin/remove_orphan_iceberg.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# true: 候補確認のみ
+# false: 実際に削除
+DRY_RUN="${DRY_RUN:-true}"
+
+# 何日前より古い orphan を対象にするか
+ORPHAN_DAYS="${ORPHAN_DAYS:-1}"
+ORPHAN_TS="$(date -d "${ORPHAN_DAYS} days ago" '+%F %T')"
+
+SPARK_SQL="sudo -u spark /usr/local/bin/spark-sql-iceberg"
+
+echo "[INFO] orphan cleanup start dry_run=${DRY_RUN} orphan_ts=${ORPHAN_TS}"
+
+if [[ "${DRY_RUN}" == "true" ]]; then
+  echo "[INFO] orphan dry-run for syslog_iceberg"
+  ${SPARK_SQL} <<SQL
+CALL hive_prod.system.remove_orphan_files(
+  table => 'logs.syslog_iceberg',
+  older_than => TIMESTAMP '${ORPHAN_TS}',
+  dry_run => true
+);
+SQL
+
+  echo "[INFO] orphan dry-run for authlog_iceberg"
+  ${SPARK_SQL} <<SQL
+CALL hive_prod.system.remove_orphan_files(
+  table => 'logs.authlog_iceberg',
+  older_than => TIMESTAMP '${ORPHAN_TS}',
+  dry_run => true
+);
+SQL
+
+  echo "[INFO] orphan dry-run for nginx_access_curated"
+  ${SPARK_SQL} <<SQL
+CALL hive_prod.system.remove_orphan_files(
+  table => 'logs.nginx_access_curated',
+  older_than => TIMESTAMP '${ORPHAN_TS}',
+  dry_run => true
+);
+SQL
+else
+  echo "[INFO] orphan delete for syslog_iceberg"
+  ${SPARK_SQL} <<SQL
+CALL hive_prod.system.remove_orphan_files(
+  table => 'logs.syslog_iceberg',
+  older_than => TIMESTAMP '${ORPHAN_TS}'
+);
+SQL
+
+  echo "[INFO] orphan delete for authlog_iceberg"
+  ${SPARK_SQL} <<SQL
+CALL hive_prod.system.remove_orphan_files(
+  table => 'logs.authlog_iceberg',
+  older_than => TIMESTAMP '${ORPHAN_TS}'
+);
+SQL
+
+  echo "[INFO] orphan delete for nginx_access_curated"
+  ${SPARK_SQL} <<SQL
+CALL hive_prod.system.remove_orphan_files(
+  table => 'logs.nginx_access_curated',
+  older_than => TIMESTAMP '${ORPHAN_TS}'
+);
+SQL
+fi
+
+echo "[INFO] orphan cleanup done dry_run=${DRY_RUN} orphan_ts=${ORPHAN_TS}"
+EOF
+
+chmod 755 /opt/iceberg/bin/remove_orphan_iceberg.sh
+```
+
+```bash
+tee /opt/iceberg/bin/cleanup_empty_hdfs_dirs_recursive.sh >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[INFO] $(date '+%F %T') cleanup start"
+
+CUTOFF_14="$(date -d '14 days ago' +%F)"
+echo "[INFO] cutoff_14=${CUTOFF_14}"
+
+sudo -u hadoop bash -s -- "$CUTOFF_14" <<'EOS'
+set -euo pipefail
+
+CUTOFF_14="$1"
+
+for base in \
+  /warehouse/iceberg/logs/authlog_iceberg/data \
+  /warehouse/iceberg/logs/syslog_iceberg/data \
+  /warehouse/iceberg/logs/nginx_access_curated/data
+do
+  echo "[INFO] base=$base"
+
+  hdfs dfs -ls "$base" 2>/dev/null | awk '$1 ~ /^d/ {print $8}' | while read -r dt_dir; do
+    echo "[INFO] dt_dir=$dt_dir"
+
+    dir_name="$(basename "$dt_dir")"
+
+    # authlog_iceberg / syslog_iceberg / nginx_access_curated は直近14日を対象外にする
+    if [ "$base" = "/warehouse/iceberg/logs/authlog_iceberg/data" ] || \
+       [ "$base" = "/warehouse/iceberg/logs/syslog_iceberg/data" ] || \
+       [ "$base" = "/warehouse/iceberg/logs/nginx_access_curated/data" ]; then
+
+      case "$dir_name" in
+        dt=????-??-??)
+          part_date="${dir_name#dt=}"
+          if [ "$part_date" \> "$CUTOFF_14" ] || [ "$part_date" = "$CUTOFF_14" ]; then
+            echo "[INFO] skip recent iceberg dir=$dt_dir"
+            continue
+          fi
+          ;;
+      esac
+    fi
+
+    hdfs dfs -ls "$dt_dir" 2>/dev/null | awk '$1 ~ /^d/ {print $8}' | while read -r subdir; do
+      hdfs dfs -rmdir "$subdir" 2>/dev/null || true
+    done
+
+    hdfs dfs -rmdir "$dt_dir" 2>/dev/null || true
+  done
+done
+EOS
+
+echo "[INFO] $(date '+%F %T') cleanup done"
+EOF
 ```
