@@ -174,8 +174,7 @@ WITH src AS (
   FROM ${SRC_TABLE}
   WHERE dt = DATE '${DT}'
     AND program LIKE '${PROGRAM_LIKE}'
-    AND msg LIKE '{%'
-    AND get_json_object(msg, '$.time') IS NOT NULL
+    AND get_json_object(trim(msg), '$.time') IS NOT NULL
 )
 SELECT
   to_timestamp(json_time) AS event_time,
@@ -203,8 +202,7 @@ SELECT COUNT(*)
 FROM ${SRC_TABLE}
 WHERE dt = DATE '${DT}'
   AND program LIKE '${PROGRAM_LIKE}'
-  AND msg LIKE '{%'
-  AND get_json_object(msg, '$.time') IS NOT NULL;
+  AND get_json_object(trim(msg), '$.time') IS NOT NULL;
 ")"
 
 DST_COUNT="$(run_spark_count "
