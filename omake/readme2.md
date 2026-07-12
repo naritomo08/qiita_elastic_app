@@ -73,6 +73,7 @@ TBLPROPERTIES (
 ```
 
 ```bash
+tee /opt/iceberg/bin/load_nginx_access_to_iceberg.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -225,6 +226,9 @@ fi
 
 log "OK nginx access count matched dt=${DT}"
 log "nginx access reload finished dt=${DT}"
+EOF
+
+chmod 755 /opt/iceberg/bin/load_nginx_access_to_iceberg.sh
 ```
 
 ---
