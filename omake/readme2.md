@@ -600,4 +600,6 @@ EOS
 
 echo "[INFO] $(date '+%F %T') cleanup done"
 EOF
+
+chmod 755 /opt/iceberg/bin/cleanup_empty_hdfs_dirs_recursive.sh
 ```
