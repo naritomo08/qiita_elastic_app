@@ -319,6 +319,7 @@ SELECT 'syslog_nginx' AS src, count(*) AS cnt
 FROM iceberg.logs.syslog_iceberg
 WHERE dt = current_date - INTERVAL '1' day
   AND program LIKE '%qiita-search-frontend%'
+  AND try(json_parse(msg)) IS NOT NULL
 
 UNION ALL
 
