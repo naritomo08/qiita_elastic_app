@@ -562,6 +562,10 @@ set -euo pipefail
 CUTOFF_14="$1"
 
 for base in \
+  /warehouse/iceberg/logs/authlog_events/data \
+  /warehouse/iceberg/logs/authlog_host_1m/data \
+  /warehouse/iceberg/logs/syslog_events/data \
+  /warehouse/iceberg/logs/syslog_host_1m/data \
   /warehouse/iceberg/logs/authlog_iceberg/data \
   /warehouse/iceberg/logs/syslog_iceberg/data \
   /warehouse/iceberg/logs/nginx_access_curated/data
