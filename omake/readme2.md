@@ -419,50 +419,49 @@ tee /opt/iceberg/bin/expire_iceberg.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-DT="${1:-$(date -d '14 days ago' '+%F 00:00:00')}"
+DT="${1:-$(date -d '14 days ago' '+%F')}"
 SNAP="${SNAP:-$(date -d '1 days ago' '+%F 00:00:00')}"
-SPARK_SQL="sudo -u spark /usr/local/bin/spark-sql-iceberg"
+
+SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
+CATALOG="${CATALOG:-hive_prod}"
+DB="${DB:-logs}"
+
+TABLES=(
+  "syslog_iceberg"
+  "authlog_iceberg"
+  "nginx_access_curated"
+)
+
+run_sql() {
+  local sql="$1"
+
+  bash -lc "${SPARK_SQL} <<SQL
+${sql}
+SQL
+"
+}
 
 echo "[INFO] daily cleanup start dt=${DT} snap=${SNAP}"
 
-${SPARK_SQL} <<SQL
-DELETE FROM hive_prod.logs.syslog_iceberg
-WHERE dt < DATE '${DT}';
-SQL
+for tbl in "${TABLES[@]}"; do
+  echo "[INFO] DELETE ${CATALOG}.${DB}.${tbl}"
 
-${SPARK_SQL} <<SQL
-DELETE FROM hive_prod.logs.authlog_iceberg
+  run_sql "
+DELETE FROM ${CATALOG}.${DB}.${tbl}
 WHERE dt < DATE '${DT}';
-SQL
+"
 
-${SPARK_SQL} <<SQL
-DELETE FROM hive_prod.logs.nginx_access_curated
-WHERE dt < DATE '${DT}';
-SQL
+  echo "[INFO] expire_snapshots ${CATALOG}.${DB}.${tbl}"
 
-${SPARK_SQL} <<SQL
-CALL hive_prod.system.expire_snapshots(
-  table => 'logs.syslog_iceberg',
+  run_sql "
+CALL ${CATALOG}.system.expire_snapshots(
+  table => '${DB}.${tbl}',
   older_than => TIMESTAMP '${SNAP}',
   clean_expired_metadata => true
 );
-SQL
+"
 
-${SPARK_SQL} <<SQL
-CALL hive_prod.system.expire_snapshots(
-  table => 'logs.authlog_iceberg',
-  older_than => TIMESTAMP '${SNAP}',
-  clean_expired_metadata => true
-);
-SQL
-
-${SPARK_SQL} <<SQL
-CALL hive_prod.system.expire_snapshots(
-  table => 'logs.nginx_access_curated',
-  older_than => TIMESTAMP '${SNAP}',
-  clean_expired_metadata => true
-);
-SQL
+done
 
 echo "[INFO] daily cleanup done dt=${DT} snap=${SNAP}"
 EOF
@@ -475,70 +474,77 @@ tee /opt/iceberg/bin/remove_orphan_iceberg.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-# true: 候補確認のみ
+# true : 削除候補の確認のみ
 # false: 実際に削除
 DRY_RUN="${DRY_RUN:-true}"
 
-# 何日前より古い orphan を対象にするか
+# 何日前より古い orphan ファイルを対象にするか
 ORPHAN_DAYS="${ORPHAN_DAYS:-1}"
 ORPHAN_TS="$(date -d "${ORPHAN_DAYS} days ago" '+%F %T')"
 
-SPARK_SQL="sudo -u spark /usr/local/bin/spark-sql-iceberg"
+SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
+CATALOG="${CATALOG:-hive_prod}"
+DB="${DB:-logs}"
+
+TABLES=(
+  "syslog_iceberg"
+  "authlog_iceberg"
+  "nginx_access_curated"
+)
+
+run_sql() {
+  local sql="$1"
+
+  bash -lc "${SPARK_SQL} <<SQL
+${sql}
+SQL
+"
+}
+
+case "${DRY_RUN}" in
+  true|false)
+    ;;
+  *)
+    echo "[ERROR] DRY_RUN must be true or false: ${DRY_RUN}" >&2
+    exit 1
+    ;;
+esac
+
+if ! [[ "${ORPHAN_DAYS}" =~ ^[0-9]+$ ]]; then
+  echo "[ERROR] ORPHAN_DAYS must be a non-negative integer: ${ORPHAN_DAYS}" >&2
+  exit 1
+fi
 
 echo "[INFO] orphan cleanup start dry_run=${DRY_RUN} orphan_ts=${ORPHAN_TS}"
 
-if [[ "${DRY_RUN}" == "true" ]]; then
-  echo "[INFO] orphan dry-run for syslog_iceberg"
-  ${SPARK_SQL} <<SQL
-CALL hive_prod.system.remove_orphan_files(
-  table => 'logs.syslog_iceberg',
+for tbl in "${TABLES[@]}"; do
+  FULL_TABLE="${CATALOG}.${DB}.${tbl}"
+
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    echo "[INFO] orphan dry-run start: ${FULL_TABLE}"
+
+    run_sql "
+CALL ${CATALOG}.system.remove_orphan_files(
+  table => '${DB}.${tbl}',
   older_than => TIMESTAMP '${ORPHAN_TS}',
   dry_run => true
 );
-SQL
+"
 
-  echo "[INFO] orphan dry-run for authlog_iceberg"
-  ${SPARK_SQL} <<SQL
-CALL hive_prod.system.remove_orphan_files(
-  table => 'logs.authlog_iceberg',
-  older_than => TIMESTAMP '${ORPHAN_TS}',
-  dry_run => true
-);
-SQL
+    echo "[INFO] orphan dry-run done : ${FULL_TABLE}"
+  else
+    echo "[INFO] orphan delete start: ${FULL_TABLE}"
 
-  echo "[INFO] orphan dry-run for nginx_access_curated"
-  ${SPARK_SQL} <<SQL
-CALL hive_prod.system.remove_orphan_files(
-  table => 'logs.nginx_access_curated',
-  older_than => TIMESTAMP '${ORPHAN_TS}',
-  dry_run => true
-);
-SQL
-else
-  echo "[INFO] orphan delete for syslog_iceberg"
-  ${SPARK_SQL} <<SQL
-CALL hive_prod.system.remove_orphan_files(
-  table => 'logs.syslog_iceberg',
+    run_sql "
+CALL ${CATALOG}.system.remove_orphan_files(
+  table => '${DB}.${tbl}',
   older_than => TIMESTAMP '${ORPHAN_TS}'
 );
-SQL
+"
 
-  echo "[INFO] orphan delete for authlog_iceberg"
-  ${SPARK_SQL} <<SQL
-CALL hive_prod.system.remove_orphan_files(
-  table => 'logs.authlog_iceberg',
-  older_than => TIMESTAMP '${ORPHAN_TS}'
-);
-SQL
-
-  echo "[INFO] orphan delete for nginx_access_curated"
-  ${SPARK_SQL} <<SQL
-CALL hive_prod.system.remove_orphan_files(
-  table => 'logs.nginx_access_curated',
-  older_than => TIMESTAMP '${ORPHAN_TS}'
-);
-SQL
-fi
+    echo "[INFO] orphan delete done : ${FULL_TABLE}"
+  fi
+done
 
 echo "[INFO] orphan cleanup done dry_run=${DRY_RUN} orphan_ts=${ORPHAN_TS}"
 EOF
