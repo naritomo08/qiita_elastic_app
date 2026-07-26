@@ -67,7 +67,7 @@ curl -X PUT "http://elastic1:9200/_index_template/logs-access-iceberg-template" 
 -H "Content-Type: application/json" \
 -d '{
   "index_patterns": ["logs-access-iceberg"],
-  "priority": 600,
+  "priority": 2000,
   "data_stream": {},
   "template": {
     "settings": {
