@@ -369,6 +369,10 @@ LOG_FILE="${LOG_DIR}/compact_iceberg.log"
 TABLES=(
   "syslog_iceberg"
   "authlog_iceberg"
+  "authlog_events"
+  "syslog_events"
+  "syslog_host_1m"
+  "authlog_host_1m"
   "nginx_access_curated"
 )
 
