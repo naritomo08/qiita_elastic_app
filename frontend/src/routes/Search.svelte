@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher, onMount } from "svelte";
+  import PageSelector from "../components/PageSelector.svelte";
   import Pagination from "../components/Pagination.svelte";
   import SearchForm from "../components/SearchForm.svelte";
   import Tags from "../components/Tags.svelte";
@@ -46,7 +47,10 @@
       <p class="eyebrow">SEARCH RESULTS</p>
       <h1>「{q}」の検索結果</h1>
     </div>
-    <strong>{total.toLocaleString()}<small> 件</small></strong>
+    <div class="results-meta">
+      <strong class="results-total">{total.toLocaleString()}<small> 件</small></strong>
+      <PageSelector base="/search" params={{ q, size }} {page} {totalPages} {navigate} />
+    </div>
   </div>
 
   {#if loading}

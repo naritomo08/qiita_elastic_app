@@ -134,7 +134,7 @@
     {:else if route.path.startsWith("/articles/")}
       <ArticleDetail {...routeProps()} on:error={(event) => (error = event.detail)} />
     {:else if route.path === "/all"}
-      <AllArticles params={route.params} on:error={(event) => (error = event.detail)} />
+      <AllArticles params={route.params} navigate={navigate} on:error={(event) => (error = event.detail)} />
     {:else if route.path === "/search"}
       <Search params={route.params} navigate={navigate} on:error={(event) => (error = event.detail)} />
     {:else}

@@ -1,11 +1,13 @@
 <script>
   import { createEventDispatcher, onMount } from "svelte";
   import ArticleCard from "../components/ArticleCard.svelte";
+  import PageSelector from "../components/PageSelector.svelte";
   import Pagination from "../components/Pagination.svelte";
   import { api } from "../lib/api.js";
   import { positiveInt } from "../lib/utils.js";
 
   export let params;
+  export let navigate;
   const dispatch = createEventDispatcher();
   let results = [];
   let total = 0;
@@ -38,7 +40,10 @@
       <h1>全記事一覧</h1>
       <p class="all-articles-copy">Elasticsearchに登録されている記事を作成日順で表示しています。</p>
     </div>
-    <strong>{total.toLocaleString()}<small> 件</small></strong>
+    <div class="results-meta">
+      <strong class="results-total">{total.toLocaleString()}<small> 件</small></strong>
+      <PageSelector base="/all" params={{ size }} {page} {totalPages} {navigate} />
+    </div>
   </div>
 </section>
 
