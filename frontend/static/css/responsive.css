@@ -141,6 +141,11 @@
     align-items: start;
   }
 
+  .results-summary {
+    flex-direction: column;
+    gap: 16px;
+  }
+
   .article-list-controls {
     align-items: flex-end;
     flex-direction: column;
@@ -168,8 +173,12 @@
     overflow-wrap: anywhere;
   }
 
-  .results-summary > strong {
+  .results-total {
     font-size: 1.9rem;
+  }
+
+  .results-meta {
+    align-items: flex-start;
   }
 
   .article-dates {

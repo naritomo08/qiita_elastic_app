@@ -19,6 +19,18 @@ backendSelect.addEventListener("change", async () => {
   await renderRoute();
 });
 
+document.addEventListener("change", async (event) => {
+  if (!event.target.matches("[data-page-select]")) return;
+  const page = Number.parseInt(event.target.value, 10);
+  if (!Number.isSafeInteger(page) || page < 1) return;
+
+  event.target.disabled = true;
+  const url = new URL(location.href);
+  url.searchParams.set("page", String(page));
+  history.pushState({}, "", url);
+  await renderRoute();
+});
+
 document.addEventListener("click", async (event) => {
   const healthRefreshButton = event.target.closest("[data-health-refresh]");
   if (healthRefreshButton) {
