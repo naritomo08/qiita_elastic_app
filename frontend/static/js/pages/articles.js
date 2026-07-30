@@ -70,7 +70,10 @@ export async function renderAllArticles() {
           <h1>全記事一覧</h1>
           <p class="all-articles-copy text-qiita-muted">Elasticsearchに登録されている記事を作成日順で表示しています。</p>
         </div>
-        <strong class="text-qiita-dark">${Number(data.total).toLocaleString()}<small> 件</small></strong>
+        <div class="results-meta">
+          <strong class="results-total text-qiita-dark">${Number(data.total).toLocaleString()}<small> 件</small></strong>
+          ${pageSelector(page, totalPages)}
+        </div>
       </div>
     </section>
     <section class="section">
@@ -209,7 +212,10 @@ export async function renderSearch() {
           <p class="eyebrow uppercase tracking-[0.18em] text-qiita-dark">SEARCH RESULTS</p>
           <h1>「${escapeHtml(q)}」の検索結果</h1>
         </div>
-        <strong class="text-qiita-dark">${Number(data.total).toLocaleString()}<small> 件</small></strong>
+        <div class="results-meta">
+          <strong class="results-total text-qiita-dark">${Number(data.total).toLocaleString()}<small> 件</small></strong>
+          ${pageSelector(page, totalPages)}
+        </div>
       </div>
       ${data.results.length ? `
         <div class="result-list">${data.results.map(resultCard).join("")}</div>
@@ -364,6 +370,22 @@ function searchForm(value, size = 10) {
         <button class="bg-qiita-green transition hover:-translate-y-0.5 hover:bg-qiita-dark" type="submit">検索</button>
       </div>
     </form>`;
+}
+
+function pageSelector(page, totalPages) {
+  if (totalPages <= 1) return "";
+  const options = Array.from({ length: totalPages }, (_, index) => {
+    const pageNumber = index + 1;
+    return `<option value="${pageNumber}"${pageNumber === page ? " selected" : ""}>${pageNumber}</option>`;
+  }).join("");
+  return `
+    <label class="page-selector">
+      <span>ページ</span>
+      <select class="transition hover:border-qiita-green focus:border-qiita-green focus:outline-none focus:ring-2 focus:ring-qiita-green/20" data-page-select aria-label="移動先のページ番号">
+        ${options}
+      </select>
+      <span>/ ${totalPages}</span>
+    </label>`;
 }
 
 function pagination(q, page, size, totalPages) {
