@@ -286,7 +286,15 @@ function SearchPage({ api, locationState, navigate, onReady, showNotice }) {
             <p className="eyebrow">SEARCH RESULTS</p>
             <h1>{`「${q}」の検索結果`}</h1>
           </div>
-          <strong>{Number(state.data.total).toLocaleString()}<small> 件</small></strong>
+          <div className="results-meta">
+            <strong className="results-total">{Number(state.data.total).toLocaleString()}<small> 件</small></strong>
+            <PageSelector
+              href={(target) => `/search?${new URLSearchParams({ q, page: target, size })}`}
+              navigate={navigate}
+              page={page}
+              totalPages={totalPages}
+            />
+          </div>
         </div>
         {state.data.results?.length ? (
           <>
@@ -329,7 +337,15 @@ function AllArticles({ api, locationState, navigate, onReady }) {
             <h1>全記事一覧</h1>
             <p className="all-articles-copy">Elasticsearchに登録されている記事を作成日順で表示しています。</p>
           </div>
-          <strong>{Number(state.data.total).toLocaleString()}<small> 件</small></strong>
+          <div className="results-meta">
+            <strong className="results-total">{Number(state.data.total).toLocaleString()}<small> 件</small></strong>
+            <PageSelector
+              href={(target) => `/all?${new URLSearchParams({ page: target, size })}`}
+              navigate={navigate}
+              page={page}
+              totalPages={totalPages}
+            />
+          </div>
         </div>
       </section>
       <section className="section">
@@ -600,6 +616,25 @@ function Pagination({ href, navigate, page, totalPages }) {
       <span>{page} / {totalPages}</span>
       {page < totalPages ? <a href={href(page + 1)} onClick={routeClick(navigate)}>次へ →</a> : <span className="disabled">次へ →</span>}
     </nav>
+  );
+}
+
+function PageSelector({ href, navigate, page, totalPages }) {
+  if (totalPages <= 1) return null;
+  return (
+    <label className="page-selector">
+      <span>ページ</span>
+      <select
+        aria-label="移動先のページ番号"
+        onChange={(event) => navigate(href(event.target.value))}
+        value={page}
+      >
+        {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+          <option key={pageNumber} value={pageNumber}>{pageNumber}</option>
+        ))}
+      </select>
+      <span>/ {totalPages}</span>
+    </label>
   );
 }
 
