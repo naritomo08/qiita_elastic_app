@@ -331,6 +331,51 @@ WHERE dt = current_date - INTERVAL '1' day
 
 ---
 
+## Grafana SQL例
+
+```bash
+SELECT
+  CAST(date_trunc('day', at_timezone(event_time, 'Asia/Tokyo')) AS timestamp) AS time,
+  COUNT(*) AS value
+FROM iceberg.logs.nginx_access_curated
+WHERE dt BETWEEN CAST(from_iso8601_timestamp('${__from:date:iso}') AS date)
+             AND CAST(from_iso8601_timestamp('${__to:date:iso}') AS date)
+    AND event_time BETWEEN from_iso8601_timestamp('${__from:date:iso}')
+               AND from_iso8601_timestamp('${__to:date:iso}')
+GROUP BY 1
+ORDER BY 1
+```
+
+```bash
+SELECT
+  CAST(date_trunc('day', at_timezone(event_time, 'Asia/Tokyo')) AS timestamp) AS time,
+  concat('site:', container_name) AS metric,
+  COUNT(*) AS value
+FROM iceberg.logs.nginx_access_curated
+WHERE dt BETWEEN CAST(from_iso8601_timestamp('${__from:date:iso}') AS date)
+             AND CAST(from_iso8601_timestamp('${__to:date:iso}') AS date)
+    AND event_time BETWEEN from_iso8601_timestamp('${__from:date:iso}')
+               AND from_iso8601_timestamp('${__to:date:iso}')
+GROUP BY 1, 2
+ORDER BY 1, 2
+```
+
+```bash
+SELECT
+  CAST(date_trunc('day', at_timezone(event_time, 'Asia/Tokyo')) AS timestamp) AS time,
+  concat('client:', client_ip) AS metric,
+  COUNT(*) AS value
+FROM iceberg.logs.nginx_access_curated
+WHERE dt BETWEEN CAST(from_iso8601_timestamp('${__from:date:iso}') AS date)
+             AND CAST(from_iso8601_timestamp('${__to:date:iso}') AS date)
+    AND event_time BETWEEN from_iso8601_timestamp('${__from:date:iso}')
+               AND from_iso8601_timestamp('${__to:date:iso}')
+GROUP BY 1, 2
+ORDER BY 1, 2
+```
+
+---
+
 ## データ確認
 
 ```sql
