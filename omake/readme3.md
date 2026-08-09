@@ -126,6 +126,7 @@ set -euo pipefail
 
 ES_URL="${ES_URL:-http://elastic1:9200}"
 DATA_STREAM="${DATA_STREAM:-logs-access-iceberg}"
+BULK_BATCH_DOCS="${BULK_BATCH_DOCS:-500}"
 
 SPARK_SQL="${SPARK_SQL:-sudo -u spark /usr/local/bin/spark-sql-iceberg}"
 HDFS="${HDFS:-sudo -u spark hdfs dfs}"
@@ -162,9 +163,15 @@ if ! [[ "${TARGET_DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   exit 1
 fi
 
+if ! [[ "${BULK_BATCH_DOCS}" =~ ^[1-9][0-9]*$ ]]; then
+  log "[ERROR] BULK_BATCH_DOCS must be a positive integer. input=${BULK_BATCH_DOCS}"
+  exit 1
+fi
+
 log "[INFO] TARGET_DT=${TARGET_DT}"
 log "[INFO] NEXT_DT=${NEXT_DT}"
 log "[INFO] DATA_STREAM=${DATA_STREAM}"
+log "[INFO] BULK_BATCH_DOCS=${BULK_BATCH_DOCS}"
 log "[INFO] TABLE=${CATALOG}.${DB}.${TABLE}"
 log "[INFO] LOCAL_WORK_DIR=${LOCAL_WORK_DIR}"
 log "[INFO] HDFS_WORK_DIR=${HDFS_WORK_DIR}"
@@ -255,24 +262,57 @@ if [ "${BULK_LINES}" -eq 0 ]; then
   exit 1
 fi
 
-log "[INFO] bulk upload to Elasticsearch"
+log "[INFO] split bulk file. docs_per_batch=${BULK_BATCH_DOCS}"
+
+BULK_PART_PREFIX="${LOCAL_WORK_DIR}/bulk_part_"
+split \
+  -l "$((BULK_BATCH_DOCS * 2))" \
+  --numeric-suffixes=1 \
+  --suffix-length=5 \
+  "${BULK_FILE}" \
+  "${BULK_PART_PREFIX}"
+
+BULK_PART_FILES=("${BULK_PART_PREFIX}"*)
+BULK_PART_COUNT=${#BULK_PART_FILES[@]}
+log "[INFO] bulk batches=${BULK_PART_COUNT}"
+
+BULK_PART_NO=0
+for BULK_PART_FILE in "${BULK_PART_FILES[@]}"; do
+  BULK_PART_NO=$((BULK_PART_NO + 1))
+  BULK_PART_LINES=$(wc -l < "${BULK_PART_FILE}" | awk '{print $1}')
+  BULK_PART_DOCS=$((BULK_PART_LINES / 2))
+  BULK_PART_BYTES=$(wc -c < "${BULK_PART_FILE}" | awk '{print $1}')
+
+  log "[INFO] bulk upload batch=${BULK_PART_NO}/${BULK_PART_COUNT} docs=${BULK_PART_DOCS} bytes=${BULK_PART_BYTES}"
+
+  HTTP_CODE=$(curl -s -o "${RESP_FILE}" -w "%{http_code}" \
+    -H "Content-Type: application/x-ndjson" \
+    -X POST "${ES_URL}/_bulk?refresh=false" \
+    --data-binary @"${BULK_PART_FILE}")
+
+  if [ "${HTTP_CODE}" != "200" ]; then
+    log "[ERROR] bulk request failed. batch=${BULK_PART_NO}/${BULK_PART_COUNT} http_code=${HTTP_CODE}"
+    cat "${RESP_FILE}"
+    exit 1
+  fi
+
+  HAS_ERRORS=$(jq -r '.errors' "${RESP_FILE}")
+
+  if [ "${HAS_ERRORS}" != "false" ]; then
+    log "[ERROR] bulk completed with item errors. batch=${BULK_PART_NO}/${BULK_PART_COUNT}"
+    jq '.items[] | select(.create.error != null) | .create.error' "${RESP_FILE}" | head -20
+    exit 1
+  fi
+done
+
+log "[INFO] refresh Elasticsearch data stream"
 
 HTTP_CODE=$(curl -s -o "${RESP_FILE}" -w "%{http_code}" \
-  -H "Content-Type: application/x-ndjson" \
-  -X POST "${ES_URL}/_bulk?refresh=true" \
-  --data-binary @"${BULK_FILE}")
+  -X POST "${ES_URL}/${DATA_STREAM}/_refresh")
 
 if [ "${HTTP_CODE}" != "200" ]; then
-  log "[ERROR] bulk request failed. http_code=${HTTP_CODE}"
+  log "[ERROR] refresh failed. http_code=${HTTP_CODE}"
   cat "${RESP_FILE}"
-  exit 1
-fi
-
-HAS_ERRORS=$(jq -r '.errors' "${RESP_FILE}")
-
-if [ "${HAS_ERRORS}" != "false" ]; then
-  log "[ERROR] bulk completed with item errors"
-  jq '.items[] | select(.create.error != null) | .create.error' "${RESP_FILE}" | head -20
   exit 1
 fi
 
