@@ -158,13 +158,36 @@ function observeArticleTree(headings, tree) {
       .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
     if (!active) return;
 
-    links.forEach((link) => link.classList.remove("is-active"));
-    links.get(active.target.id)?.classList.add("is-active");
+    links.forEach((link) => {
+      link.classList.remove("is-active");
+      link.removeAttribute("aria-current");
+    });
+    const activeLink = links.get(active.target.id);
+    if (!activeLink) return;
+
+    activeLink.classList.add("is-active");
+    activeLink.setAttribute("aria-current", "location");
+    keepActiveTreeLinkVisible(activeLink, tree);
   }, {
     rootMargin: "-18% 0px -72% 0px",
     threshold: 0,
   });
   headings.forEach((heading) => observer.observe(heading));
+}
+
+function keepActiveTreeLinkVisible(link, tree) {
+  const scrollContainer = tree.closest(".article-tree");
+  if (!scrollContainer || scrollContainer.scrollHeight <= scrollContainer.clientHeight) return;
+
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const linkRect = link.getBoundingClientRect();
+  const scrollMargin = 8;
+
+  if (linkRect.top < containerRect.top + scrollMargin) {
+    scrollContainer.scrollTop += linkRect.top - containerRect.top - scrollMargin;
+  } else if (linkRect.bottom > containerRect.bottom - scrollMargin) {
+    scrollContainer.scrollTop += linkRect.bottom - containerRect.bottom + scrollMargin;
+  }
 }
 
 function keepArticleTreePositionOnClick(tree) {
