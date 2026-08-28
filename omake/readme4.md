@@ -134,18 +134,12 @@ aws s3 ls \
 
 例として `2026-06-21` を同期します。
 
-実行ユーザー: 通常ユーザー
+実行ユーザー: spark
 
 ```bash
-TARGET_DATE="2026-06-21"
-
-sudo -u spark \
-  AWS_PROFILE="${AWS_PROFILE}" \
-  AWS_REGION="${AWS_REGION}" \
-  GLUE_DATABASE="${GLUE_DATABASE}" \
-  SPARK_SQL_BIN=/usr/local/bin/spark-sql-iceberg-aws \
+TABLE=syslog_iceberg \
   TABLE=nginx_access_curated \
-  DT="${TARGET_DATE}" \
+  DT=2026-08-18 \
   /opt/iceberg/bin/export_iceberg_to_s3.sh
 ```
 
@@ -290,11 +284,377 @@ Table: v_nginx_access_daily
 
 更新頻度を制御しやすい `SPICE` を基本とし、常に最新の AWS 側コピーを参照する必要がある場合だけ `Direct Query` を選びます。
 
-## 8. 今回導入したデータだけを削除する
+## 8. AWS 側 Iceberg を運用する
+
+日次同期の `DELETE + INSERT` を繰り返すと、snapshot、metadata file、data file が増えます。運用編と同じ方針で、`nginx_access_curated` も日次確認と週次 maintenance の対象にします。
+
+### 8.1 snapshot 保持設定
+
+Athena で保持設定を行います。次の例では最低3 snapshot、最長7日、過去の metadata file は30個まで保持します。
+
+```sql
+ALTER TABLE logs.nginx_access_curated SET TBLPROPERTIES (
+  'vacuum_min_snapshots_to_keep'='3',
+  'vacuum_max_snapshot_age_seconds'='604800',
+  'vacuum_max_metadata_files_to_keep'='30'
+);
+```
+
+7日は例です。同期障害に気付いて調査・復旧するまでの期間より短くしないでください。
+
+### 8.2 snapshot と data file を確認する
+
+Athena の Iceberg metadata table で snapshot を確認します。
+
+```sql
+SELECT
+    committed_at,
+    snapshot_id,
+    operation
+FROM "logs"."nginx_access_curated$snapshots"
+ORDER BY committed_at DESC
+LIMIT 20;
+```
+
+data file の数とサイズを確認します。
+
+```sql
+SELECT
+    count(*) AS file_count,
+    sum(record_count) AS record_count,
+    round(sum(file_size_in_bytes) / 1024.0 / 1024.0, 2) AS total_mb,
+    round(avg(file_size_in_bytes) / 1024.0 / 1024.0, 2) AS avg_file_mb
+FROM "logs"."nginx_access_curated$files";
+```
+
+小さい file の詳細です。
+
+```sql
+SELECT
+    file_path,
+    record_count,
+    file_size_in_bytes
+FROM "logs"."nginx_access_curated$files"
+ORDER BY file_size_in_bytes ASC
+LIMIT 50;
+```
+
+### 8.3 OPTIMIZE と VACUUM
+
+`nginx_access_curated` は `dt` partition のため、まず対象日を絞って compaction します。
+
+```sql
+OPTIMIZE logs.nginx_access_curated
+REWRITE DATA USING BIN_PACK
+WHERE dt = DATE '2026-06-21';
+```
+
+`OPTIMIZE` の `WHERE` には partition column だけを指定できます。全 table の `OPTIMIZE` はスキャン量と実行時間が増えるため、小規模 PoC 以外では避けます。
+
+`OPTIMIZE` 後に件数と代表データを確認し、問題がなければ期限切れ snapshot と orphan file を回収します。
+
+```sql
+SELECT count(*)
+FROM logs.nginx_access_curated
+WHERE dt = DATE '2026-06-21';
+```
+
+```sql
+VACUUM logs.nginx_access_curated;
+```
+
+実行順序は次のとおりです。
+
+```text
+OPTIMIZE
+  ↓
+件数・検索結果を確認
+  ↓
+VACUUM
+  ↓
+snapshot・S3 容量を確認
+```
+
+`VACUUM` には Iceberg table prefix に対する `s3:DeleteObject` が必要です。また、期限切れ snapshot は復元やタイムトラベルができなくなります。
+
+### 8.4 S3 容量と Athena スキャン量を確認する
+
+S3 のオブジェクト数と容量を確認します。
+
+```bash
+aws s3 ls \
+  "s3://${ICEBERG_BUCKET}/warehouse/${GLUE_DATABASE}/nginx_access_curated/" \
+  --recursive \
+  --summarize \
+  --profile "${AWS_PROFILE}" \
+  | tail -5
+```
+
+運用編の `/opt/iceberg/bin/run_athena_query_with_stats.sh` を使い、代表クエリの `DataScannedInBytes` と実行時間を確認します。
+
+```bash
+SQL="SELECT status, count(*) \
+FROM ${GLUE_DATABASE}.nginx_access_curated \
+WHERE dt = DATE '${TARGET_DATE}' \
+GROUP BY status" \
+AWS_REGION="${AWS_REGION}" \
+AWS_PROFILE="${AWS_PROFILE}" \
+ATHENA_RESULT_BUCKET="${ATHENA_RESULT_BUCKET}" \
+ATHENA_WORKGROUP="${ATHENA_WORKGROUP}" \
+/opt/iceberg/bin/run_athena_query_with_stats.sh
+```
+
+日付条件の付け忘れ、`SELECT *`、対象期間の拡大、小さい file の増加がないかを継続して確認します。
+
+### 8.5 日次確認スクリプトを丸ごと入れ替える
+
+運用編の `/opt/iceberg/bin/check_aws_iceberg.sh` を、`nginx_access_curated` を含む次の内容で置き換えます。
+
+実行ユーザー: 通常ユーザー
+
+```bash
+sudo tee /opt/iceberg/bin/check_aws_iceberg.sh > /dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+AWS_REGION=${AWS_REGION:-ap-northeast-1}
+AWS_PROFILE=${AWS_PROFILE:-default}
+ICEBERG_BUCKET=${ICEBERG_BUCKET:?ICEBERG_BUCKET is required}
+ATHENA_RESULT_BUCKET=${ATHENA_RESULT_BUCKET:?ATHENA_RESULT_BUCKET is required}
+ATHENA_WORKGROUP=${ATHENA_WORKGROUP:-home-log-iceberg}
+GLUE_DATABASE=${GLUE_DATABASE:-logs}
+DT=${DT:-$(date -d yesterday +%F)}
+RUN_ATHENA=${RUN_ATHENA:-/opt/iceberg/bin/run_athena_query_with_stats.sh}
+
+TABLES=(
+  syslog_iceberg
+  authlog_iceberg
+  nginx_access_curated
+)
+
+log() {
+  echo "[INFO] $(date '+%F %T') $*"
+}
+
+run_athena() {
+  local sql="$1"
+
+  AWS_REGION="${AWS_REGION}" \
+  AWS_PROFILE="${AWS_PROFILE}" \
+  ATHENA_RESULT_BUCKET="${ATHENA_RESULT_BUCKET}" \
+  ATHENA_WORKGROUP="${ATHENA_WORKGROUP}" \
+  SQL="${sql}" \
+  "${RUN_ATHENA}"
+}
+
+if ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  log "ERROR DT must be YYYY-MM-DD: ${DT}"
+  exit 1
+fi
+
+log "check AWS Iceberg daily: DT=${DT}"
+
+for table in "${TABLES[@]}"; do
+  log "S3 summarize: ${table}"
+  aws s3 ls \
+    "s3://${ICEBERG_BUCKET}/warehouse/${GLUE_DATABASE}/${table}/" \
+    --recursive \
+    --summarize \
+    --profile "${AWS_PROFILE}" \
+    | tail -5
+
+  log "Athena count: ${table}"
+  run_athena "SELECT count(*) FROM ${GLUE_DATABASE}.${table} WHERE dt = DATE '${DT}'"
+done
+
+log "daily check completed successfully: DT=${DT}"
+EOF
+
+sudo chmod 755 /opt/iceberg/bin/check_aws_iceberg.sh
+sudo chown spark:spark /opt/iceberg/bin/check_aws_iceberg.sh
+```
+
+対象日を指定して手動実行し、3テーブルそれぞれの件数、スキャン量、S3容量が表示されることを確認します。
+
+実行ユーザー: spark
+
+```bash
+DT=2026-08-18 \
+/opt/iceberg/bin/check_aws_iceberg_daily.sh
+```
+
+`DT` を省略した場合は前日を確認します。
+
+### 8.6 週次 maintenance スクリプトを丸ごと入れ替える
+
+運用編の `/opt/iceberg/bin/maintain_aws_iceberg_weekly.sh` を、`nginx_access_curated` を含む次の内容で置き換えます。
+
+実行ユーザー: 通常ユーザー
+
+```bash
+sudo tee /opt/iceberg/bin/maintain_aws_iceberg.sh > /dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+AWS_REGION=${AWS_REGION:-ap-northeast-1}
+AWS_PROFILE=${AWS_PROFILE:-default}
+ATHENA_RESULT_BUCKET=${ATHENA_RESULT_BUCKET:?ATHENA_RESULT_BUCKET is required}
+ATHENA_WORKGROUP=${ATHENA_WORKGROUP:-home-log-iceberg}
+GLUE_DATABASE=${GLUE_DATABASE:-logs}
+DT=${DT:-}
+RUN_ATHENA=${RUN_ATHENA:-/opt/iceberg/bin/run_athena_query_with_stats.sh}
+
+TABLES=(
+  syslog_iceberg
+  authlog_iceberg
+  nginx_access_curated
+)
+
+log() {
+  echo "[INFO] $(date '+%F %T') $*"
+}
+
+run_athena() {
+  local sql="$1"
+
+  AWS_REGION="${AWS_REGION}" \
+  AWS_PROFILE="${AWS_PROFILE}" \
+  ATHENA_RESULT_BUCKET="${ATHENA_RESULT_BUCKET}" \
+  ATHENA_WORKGROUP="${ATHENA_WORKGROUP}" \
+  SQL="${sql}" \
+  "${RUN_ATHENA}"
+}
+
+if [ -n "${DT}" ] && ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  log "ERROR DT must be YYYY-MM-DD: ${DT}"
+  exit 1
+fi
+
+log "weekly maintenance start: DT=${DT:-all}"
+
+for table in "${TABLES[@]}"; do
+  log "set vacuum properties: ${table}"
+  run_athena "ALTER TABLE ${GLUE_DATABASE}.${table} SET TBLPROPERTIES ('vacuum_min_snapshots_to_keep'='3','vacuum_max_snapshot_age_seconds'='604800','vacuum_max_metadata_files_to_keep'='30')"
+
+  if [ -n "${DT}" ]; then
+    log "optimize ${table}: DT=${DT}"
+    run_athena "OPTIMIZE ${GLUE_DATABASE}.${table} REWRITE DATA USING BIN_PACK WHERE dt = DATE '${DT}'"
+  else
+    log "optimize ${table}: full table"
+    run_athena "OPTIMIZE ${GLUE_DATABASE}.${table} REWRITE DATA USING BIN_PACK"
+  fi
+
+  log "vacuum: ${table}"
+  run_athena "VACUUM ${GLUE_DATABASE}.${table}"
+done
+
+log "weekly maintenance completed successfully"
+EOF
+
+sudo chmod 755 /opt/iceberg/bin/maintain_aws_iceberg.sh
+sudo chown spark:spark /opt/iceberg/bin/maintain_aws_iceberg.sh
+```
+
+まず `DT` を指定して手動実行します。
+
+実行ユーザー: spark
+
+```bash
+DT=2026-08-18 \
+/opt/iceberg/bin/maintain_aws_iceberg_weekly.sh
+```
+
+成功後は、既存の `maintain-aws-iceberg.timer` が `nginx_access_curated` も処理します。ただし、運用編の timer は `DT` 未指定で全 table を `OPTIMIZE` します。データ量が増えた環境では、対象日を分割するよう maintenance スクリプトまたは unit を調整してから定期実行してください。
+
+```bash
+systemctl list-timers maintain-aws-iceberg.timer
+sudo systemctl status maintain-aws-iceberg.timer --no-pager
+journalctl -u maintain-aws-iceberg.service -n 100 --no-pager
+```
+
+AWS 日次同期、`OPTIMIZE`、`VACUUM` は同時に動かしません。特に `VACUUM` は同期処理が完了してから実行します。
+
+### 8.7 Spark 手続きで maintenance する場合
+
+Athena の代わりに Spark で対象日の data file を再配置する例です。
+
+実行ユーザー: spark
+
+```bash
+/usr/local/bin/spark-sql-iceberg-aws <<EOF
+CALL glue_prod.system.rewrite_data_files(
+  table => '${GLUE_DATABASE}.nginx_access_curated',
+  where => 'dt = DATE ''${TARGET_DATE}'''
+);
+EOF
+```
+
+orphan file は、必ず古い日時を指定して dry run から確認します。次は削除候補の確認だけで、削除は行いません。
+
+```bash
+ORPHAN_BEFORE="2026-06-14 00:00:00"
+
+/usr/local/bin/spark-sql-iceberg-aws <<EOF
+CALL glue_prod.system.remove_orphan_files(
+  table => '${GLUE_DATABASE}.nginx_access_curated',
+  older_than => TIMESTAMP '${ORPHAN_BEFORE}',
+  dry_run => true
+);
+EOF
+```
+
+同期中または直近に作成された file が候補へ含まれていないことを確認した場合だけ、運用編の手順に従って `dry_run => false` を実行します。通常は Athena の `OPTIMIZE` / `VACUUM` に統一し、Athena と Spark の maintenance を重ねて実行しません。
+
+### 8.8 IAM、S3 Versioning、lifecycle を確認する
+
+通常の同期・確認・maintenance は同期用 profile で実行します。最低限、Athena実行、Glue参照・更新、Iceberg prefix のS3読書き・削除権限が必要です。特に `VACUUM` と orphan file 削除には `s3:DeleteObject` が必要です。
+
+```bash
+aws sts get-caller-identity --profile "${AWS_PROFILE}"
+
+aws s3api get-bucket-versioning \
+  --bucket "${ICEBERG_BUCKET}" \
+  --profile "${AWS_PROFILE}"
+
+aws s3api get-bucket-lifecycle-configuration \
+  --bucket "${ICEBERG_BUCKET}" \
+  --profile "${AWS_PROFILE}"
+```
+
+運用編どおり lifecycle の対象が `warehouse/` の場合、同じ配下に作成した `nginx_access_curated` にも適用されるため追加設定は不要です。table ごとに prefix を限定した独自設定の場合は、次の prefix が対象になっていることを管理用 profile で確認します。
+
+```text
+warehouse/<GLUE_DATABASE>/nginx_access_curated/
+```
+
+既存の lifecycle configuration を `put-bucket-lifecycle-configuration` で置き換えると、他テーブルの rule を消す可能性があります。変更時は現在の全 rule を取得・退避し、`nginx_access_curated` の rule を既存設定へ追加した完全な configuration を使用します。noncurrent version の保持期間は Iceberg の snapshot 保持期間より短くしません。
+
+### 8.9 運用チェックリスト
+
+日次:
+
+- AWS 同期が成功し、自宅側と AWS 側の対象日件数が一致している
+- Athena の代表クエリが成功し、時刻表示にずれがない
+- `DataScannedInBytes` と S3 容量が急増していない
+
+週次:
+
+- snapshot 数、data file 数、平均 file size を確認する
+- 必要な日付だけ `OPTIMIZE` する
+- 同期終了後に `VACUUM` する
+- maintenance 後も件数と検索結果が正しい
+
+月次:
+
+- snapshot 保持期間が復旧要件に合っている
+- S3 Versioning / lifecycle と Athena query result の保持状況を確認する
+- IAM Access Key、AWS利用料金、QuickSight / Quick の更新頻度を確認する
+
+## 9. 今回導入したデータだけを削除する
 
 自宅 HDFS の正本は削除しません。また、記事で作成済みの `syslog_iceberg`、`authlog_iceberg`、Glue database、S3 bucket、Athena workgroup、IAM user / policy も削除しません。
 
-### 8.1 指定日の AWS コピーだけを削除する
+### 9.1 指定日の AWS コピーだけを削除する
 
 日次同期に `nginx_access_curated` を追加済みの場合は、削除対象日が次回同期で再投入されないことを先に確認します。
 
@@ -326,7 +686,7 @@ WHERE dt = DATE '2026-06-21';
 
 Iceberg の整合性を壊すため、`data/dt=2026-06-21/` のような S3 prefix を `aws s3 rm` で直接削除してはいけません。
 
-### 8.2 この README で追加した AWS 側テーブルをすべて削除する
+### 9.2 この README で追加した AWS 側テーブルをすべて削除する
 
 `nginx_access_curated` を日次同期の `TABLES` に追加した場合は、先にその1行を削除します。systemd timer 自体は `syslog_iceberg` と `authlog_iceberg` の同期に使うため停止・削除しません。
 
