@@ -467,7 +467,7 @@ for table in "${TABLES[@]}"; do
   run_athena "SELECT count(*) FROM ${GLUE_DATABASE}.${table} WHERE dt = DATE '${DT}'"
 done
 
-log "daily check completed successfully: DT=${DT}"
+log "check completed successfully: DT=${DT}"
 EOF
 
 sudo chmod 755 /opt/iceberg/bin/check_aws_iceberg.sh
@@ -548,7 +548,7 @@ for table in "${TABLES[@]}"; do
   run_athena "VACUUM ${GLUE_DATABASE}.${table}"
 done
 
-log "weekly maintenance completed successfully"
+log "maintenance completed successfully"
 EOF
 
 sudo chmod 755 /opt/iceberg/bin/maintain_aws_iceberg.sh
