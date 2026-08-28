@@ -143,64 +143,153 @@ aws s3 ls \
 実行ユーザー: root
 
 ```bash
-sudo tee /opt/iceberg/bin/check_aws_iceberg.sh > /dev/null <<'EOF'
+sudo tee /usr/local/bin/export-iceberg-to-s3 > /dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-AWS_REGION=${AWS_REGION:-ap-northeast-1}
-AWS_PROFILE=${AWS_PROFILE:-default}
-ICEBERG_BUCKET=${ICEBERG_BUCKET:?ICEBERG_BUCKET is required}
-ATHENA_RESULT_BUCKET=${ATHENA_RESULT_BUCKET:?ATHENA_RESULT_BUCKET is required}
-ATHENA_WORKGROUP=${ATHENA_WORKGROUP:-home-log-iceberg}
-GLUE_DATABASE=${GLUE_DATABASE:-logs}
-DT=${DT:-$(date -d yesterday +%F)}
-RUN_ATHENA=${RUN_ATHENA:-/opt/iceberg/bin/run_athena_query_with_stats.sh}
+ENV_FILE=${ENV_FILE:-/etc/iceberg/aws.env}
 
-TABLES=(
-  syslog_iceberg
-  authlog_iceberg
-  nginx_access_curated
-)
+if [ -r "${ENV_FILE}" ]; then
+  set -a
+  . "${ENV_FILE}"
+  set +a
+fi
+
+SOURCE_CATALOG=${SOURCE_CATALOG:-hive_prod}
+DEST_CATALOG=${DEST_CATALOG:-glue_prod}
+SOURCE_DB=${SOURCE_DB:-logs}
+DEST_DB=${DEST_DB:-${GLUE_DATABASE:-logs}}
+DT=${DT:-$(date -d yesterday +%F)}
+SPARK_SQL_BIN=${SPARK_SQL_BIN:-/usr/local/bin/spark-sql-iceberg-aws}
+SPARK_RUN_USER=${SPARK_RUN_USER:-spark}
+SPARK_RUN_LOCAL_DIRS=${SPARK_RUN_LOCAL_DIRS:-/var/lib/spark/work}
+
+if [ "$(id -un)" != "${SPARK_RUN_USER}" ]; then
+  export ENV_FILE
+  export SOURCE_CATALOG
+  export DEST_CATALOG
+  export SOURCE_DB
+  export DEST_DB
+  export GLUE_DATABASE="${GLUE_DATABASE:-}"
+  export TABLE="${TABLE:-}"
+  export TABLES="${TABLES:-}"
+  export DT
+  export SPARK_SQL_BIN
+  export AWS_REGION
+  export AWS_PROFILE="${AWS_SYNC_PROFILE:-${AWS_PROFILE:-}}"
+  export AWS_SHARED_CREDENTIALS_FILE="${AWS_SYNC_SHARED_CREDENTIALS_FILE:-${AWS_SHARED_CREDENTIALS_FILE:-}}"
+  export AWS_CONFIG_FILE="${AWS_SYNC_CONFIG_FILE:-${AWS_CONFIG_FILE:-}}"
+  export SPARK_LOCAL_DIRS="${SPARK_RUN_LOCAL_DIRS}"
+
+  exec sudo -E -u "${SPARK_RUN_USER}" -H "$0" "$@"
+fi
+
+if [ -z "${AWS_PROFILE:-}" ] && [ -n "${AWS_SYNC_PROFILE:-}" ]; then
+  AWS_PROFILE="${AWS_SYNC_PROFILE}"
+fi
+
+if [ -z "${AWS_SHARED_CREDENTIALS_FILE:-}" ] && [ -n "${AWS_SYNC_SHARED_CREDENTIALS_FILE:-}" ]; then
+  AWS_SHARED_CREDENTIALS_FILE="${AWS_SYNC_SHARED_CREDENTIALS_FILE}"
+fi
+
+if [ -z "${AWS_CONFIG_FILE:-}" ] && [ -n "${AWS_SYNC_CONFIG_FILE:-}" ]; then
+  AWS_CONFIG_FILE="${AWS_SYNC_CONFIG_FILE}"
+fi
+
+export AWS_PROFILE
+export AWS_SHARED_CREDENTIALS_FILE
+export AWS_CONFIG_FILE
+export AWS_REGION
+
+: "${AWS_PROFILE:?AWS_PROFILE is required}"
+: "${AWS_SHARED_CREDENTIALS_FILE:?AWS_SHARED_CREDENTIALS_FILE is required}"
+: "${AWS_CONFIG_FILE:?AWS_CONFIG_FILE is required}"
+: "${AWS_REGION:?AWS_REGION is required}"
+
+if [ -n "${TABLE:-}" ]; then
+  TABLES=("${TABLE}")
+else
+  read -r -a TABLES <<< "${TABLES:-syslog_iceberg authlog_iceberg nginx_access_curated}"
+fi
 
 log() {
   echo "[INFO] $(date '+%F %T') $*"
 }
 
-run_athena() {
-  local sql="$1"
-
-  AWS_REGION="${AWS_REGION}" \
-  AWS_PROFILE="${AWS_PROFILE}" \
-  ATHENA_RESULT_BUCKET="${ATHENA_RESULT_BUCKET}" \
-  ATHENA_WORKGROUP="${ATHENA_WORKGROUP}" \
-  SQL="${sql}" \
-  "${RUN_ATHENA}"
+err() {
+  echo "[ERROR] $(date '+%F %T') $*" >&2
 }
 
-if ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  log "ERROR DT must be YYYY-MM-DD: ${DT}"
-  exit 1
-fi
+extract_last_integer() {
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 ~ /^[0-9]+$/) val=$0
+    }
+    END {
+      if (val == "") exit 1
+      print val
+    }
+  '
+}
 
-log "check AWS Iceberg daily: DT=${DT}"
+run_count() {
+  local sql="$1"
+  local out
 
-for table in "${TABLES[@]}"; do
-  log "S3 summarize: ${table}"
-  aws s3 ls \
-    "s3://${ICEBERG_BUCKET}/warehouse/${GLUE_DATABASE}/${table}/" \
-    --recursive \
-    --summarize \
-    --profile "${AWS_PROFILE}" \
-    | tail -5
+  out="$("${SPARK_SQL_BIN}" -S -e "${sql}")"
+  printf '%s\n' "${out}" | extract_last_integer
+}
 
-  log "Athena count: ${table}"
-  run_athena "SELECT count(*) FROM ${GLUE_DATABASE}.${table} WHERE dt = DATE '${DT}'"
-done
+export_table() {
+  local table="$1"
+  local src_table="${SOURCE_CATALOG}.${SOURCE_DB}.${table}"
+  local dest_table="${DEST_CATALOG}.${DEST_DB}.${table}"
+  local src_count
+  local dest_count
 
-log "check completed successfully: DT=${DT}"
+  log "start export: TABLE=${table}, DT=${DT}"
+  log "SOURCE=${src_table}"
+  log "DEST=${dest_table}"
+
+  src_count="$(run_count "SELECT count(*) FROM ${src_table} WHERE dt = DATE '${DT}'")"
+  log "source count=${src_count}"
+
+  "${SPARK_SQL_BIN}" <<SQL
+DELETE FROM ${dest_table}
+WHERE dt = DATE '${DT}';
+
+INSERT INTO ${dest_table}
+SELECT *
+FROM ${src_table}
+WHERE dt = DATE '${DT}';
+SQL
+
+  dest_count="$(run_count "SELECT count(*) FROM ${dest_table} WHERE dt = DATE '${DT}'")"
+  log "dest count=${dest_count}"
+
+  if [ "${src_count}" != "${dest_count}" ]; then
+    err "count mismatch: TABLE=${table}, source=${src_count}, dest=${dest_count}"
+    exit 1
+  fi
+
+  log "completed successfully: TABLE=${table}"
+}
+
+main() {
+  local table
+
+  log "daily export start: DT=${DT}"
+  for table in "${TABLES[@]}"; do
+    export_table "${table}"
+  done
+  log "daily export completed successfully: DT=${DT}"
+}
+
+main "$@"
 EOF
 
-sudo chmod 755 /opt/iceberg/bin/check_aws_iceberg.sh
+sudo chmod 755 /usr/local/bin/export-iceberg-to-s3
 ```
 
 ### 4.2 対象日を手動同期する
