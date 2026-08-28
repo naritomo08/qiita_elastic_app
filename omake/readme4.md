@@ -140,7 +140,7 @@ aws s3 ls \
 
 ファイル: `/usr/local/bin/export-iceberg-to-s3`
 
-実行ユーザー: root
+実行ユーザー: 通常ユーザー
 
 ```bash
 sudo tee /usr/local/bin/export-iceberg-to-s3 > /dev/null <<'EOF'
