@@ -381,6 +381,8 @@ snapshot・S3 容量を確認
 
 S3 のオブジェクト数と容量を確認します。
 
+実行ユーザー: spark
+
 ```bash
 aws s3 ls \
   "s3://${ICEBERG_BUCKET}/warehouse/${GLUE_DATABASE}/nginx_access_curated/" \
@@ -392,15 +394,13 @@ aws s3 ls \
 
 運用編の `/opt/iceberg/bin/run_athena_query_with_stats.sh` を使い、代表クエリの `DataScannedInBytes` と実行時間を確認します。
 
+実行ユーザー: spark
+
 ```bash
 SQL="SELECT status, count(*) \
 FROM ${GLUE_DATABASE}.nginx_access_curated \
 WHERE dt = DATE '${TARGET_DATE}' \
 GROUP BY status" \
-AWS_REGION="${AWS_REGION}" \
-AWS_PROFILE="${AWS_PROFILE}" \
-ATHENA_RESULT_BUCKET="${ATHENA_RESULT_BUCKET}" \
-ATHENA_WORKGROUP="${ATHENA_WORKGROUP}" \
 /opt/iceberg/bin/run_athena_query_with_stats.sh
 ```
 
