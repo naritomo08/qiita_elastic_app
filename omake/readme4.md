@@ -35,12 +35,13 @@ glue_prod.logs.nginx_access_curated（Amazon S3、分析用コピー）
 
 ## 1. AWS 設定を読み込む
 
-同期を実行するホストで設定を読み込みます。
+同期を実行するホストで変数設定を読み込みます。
+
+実行ユーザー: spark
 
 ```bash
-set -a
-source /etc/iceberg/aws.env
-set +a
+source /etc/profile.d/iceberg-s3-athena.sh
+use_iceberg_aws_sync
 ```
 
 変数と接続先アカウントを確認します。想定外のアカウントや bucket が表示された場合は、以降を実行しないでください。
@@ -59,8 +60,10 @@ aws sts get-caller-identity --profile "${AWS_PROFILE}"
 
 AWS 側は自宅側と同じカラム名、型、順序で作成する必要があります。先に実テーブルを確認します。
 
+実行ユーザー: spark
+
 ```bash
-sudo -u spark /usr/local/bin/spark-sql-iceberg <<'EOF'
+/usr/local/bin/spark-sql-iceberg <<'EOF'
 DESCRIBE TABLE hive_prod.logs.nginx_access_curated;
 SHOW CREATE TABLE hive_prod.logs.nginx_access_curated;
 EOF
@@ -79,11 +82,10 @@ body_bytes_sent, request_time, upstream_addr, user_agent, raw_msg, dt, hr
 
 次の DDL は `readme2.md` の定義と一致する場合の例です。`GLUE_DATABASE=logs` 以外の場合も変数から実際の database 名が使われます。
 
+実行ユーザー: spark
+
 ```bash
-sudo -u spark \
-  AWS_PROFILE="${AWS_PROFILE}" \
-  AWS_REGION="${AWS_REGION}" \
-  /usr/local/bin/spark-sql-iceberg-aws <<EOF
+/usr/local/bin/spark-sql-iceberg-aws <<EOF
 CREATE TABLE IF NOT EXISTS glue_prod.${GLUE_DATABASE}.nginx_access_curated (
   event_time       timestamp,
   host             string,
@@ -132,6 +134,8 @@ aws s3 ls \
 
 例として `2026-06-21` を同期します。
 
+実行ユーザー: 通常ユーザー
+
 ```bash
 TARGET_DATE="2026-06-21"
 
@@ -163,11 +167,10 @@ TABLES=(
 
 Spark から自宅側と AWS 側の件数を比較します。
 
+実行ユーザー: spark
+
 ```bash
-sudo -u spark \
-  AWS_PROFILE="${AWS_PROFILE}" \
-  AWS_REGION="${AWS_REGION}" \
-  /usr/local/bin/spark-sql-iceberg-aws <<EOF
+/usr/local/bin/spark-sql-iceberg-aws <<EOF
 SELECT count(*) AS home_count
 FROM hive_prod.logs.nginx_access_curated
 WHERE dt = DATE '${TARGET_DATE}';
