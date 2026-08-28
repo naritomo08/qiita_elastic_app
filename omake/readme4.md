@@ -28,7 +28,7 @@ glue_prod.logs.nginx_access_curated（Amazon S3、分析用コピー）
 - 自宅側に `hive_prod.logs.nginx_access_curated` が存在し、参照対象日のデータが入っていること
 - `/etc/iceberg/aws.env` に `AWS_REGION`、`ICEBERG_BUCKET`、`ATHENA_RESULT_BUCKET`、`ATHENA_WORKGROUP`、`GLUE_DATABASE`、`AWS_PROFILE` が設定されていること
 - `/usr/local/bin/spark-sql-iceberg-aws` から `hive_prod` と `glue_prod` の両方を参照できること
-- `/opt/iceberg/bin/export_iceberg_to_s3.sh` が設置されていること
+- `/opt/iceberg/bin` と `/usr/local/bin` 配下を作成・更新できる `sudo` 権限があること
 - Athena workgroup が engine version 3 を使用していること
 
 構築編の IAM policy は Glue の `${GLUE_DATABASE}` 配下の全テーブルと Iceberg bucket 配下を対象にしているため、記事どおりの policy であれば本テーブルにも利用できます。独自に対象 ARN や S3 prefix を狭めている場合は、`nginx_access_curated` 用の権限を追加してください。
@@ -130,32 +130,169 @@ aws s3 ls \
 
 テーブル作成直後は `metadata/` だけで、データ同期後に `data/` が作られます。
 
-## 4. 対象日を AWS へ同期する
+## 4. 同期シェルを作成する
 
-例として `2026-06-21` を同期します。
+同期処理は `/usr/local/bin/export-iceberg-to-s3` の1本にまとめます。`TABLE` を指定すると1テーブルだけ、指定しない場合は3テーブルを順番に同期します。既存ファイルは次のコマンドで丸ごと置き換わるため、独自変更がある場合は先に退避してください。
 
-実行ユーザー: spark
+### 4.1 シェル本体
 
-```bash
-TABLE=syslog_iceberg \
-  TABLE=nginx_access_curated \
-  DT=2026-08-18 \
-  /opt/iceberg/bin/export_iceberg_to_s3.sh
-```
+自宅 HDFS から AWS S3 へ対象日のデータを同期します。AWS 側の同じ `dt` を `DELETE` してから `INSERT` し、同期元と同期先の件数を比較します。
 
-このスクリプトは AWS 側の同じ `dt` を `DELETE` してから自宅側のデータを `INSERT` し、同期元と同期先の件数を比較します。同じ日付で再実行できます。
+ファイル: `/usr/local/bin/export-iceberg-to-s3`
 
-日次同期の対象に追加する場合は、記事で作成した `/opt/iceberg/bin/export_logs_to_s3_daily.sh` の `TABLES` に追加します。
+実行ユーザー: root
 
 ```bash
+sudo tee /usr/local/bin/export-iceberg-to-s3 > /dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_CATALOG=${SOURCE_CATALOG:-hive_prod}
+DEST_CATALOG=${DEST_CATALOG:-glue_prod}
+SOURCE_DB=${SOURCE_DB:-logs}
+DEST_DB=${DEST_DB:-${GLUE_DATABASE:-logs}}
+TABLE=${TABLE:-}
+DT=${DT:-$(date -d yesterday +%F)}
+SPARK_SQL_BIN=${SPARK_SQL_BIN:-/usr/local/bin/spark-sql-iceberg-aws}
+
 TABLES=(
   syslog_iceberg
   authlog_iceberg
   nginx_access_curated
 )
+
+log() {
+  echo "[INFO] $(date '+%F %T') $*"
+}
+
+err() {
+  echo "[ERROR] $(date '+%F %T') $*" >&2
+}
+
+extract_last_integer() {
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 ~ /^[0-9]+$/) val=$0
+    }
+    END {
+      if (val == "") exit 1
+      print val
+    }
+  '
+}
+
+run_count() {
+  local sql="$1"
+  local out
+
+  out="$("${SPARK_SQL_BIN}" -S -e "${sql}")"
+  printf '%s\n' "${out}" | extract_last_integer
+}
+
+sync_table() {
+  local table="$1"
+  local src_table="${SOURCE_CATALOG}.${SOURCE_DB}.${table}"
+  local dest_table="${DEST_CATALOG}.${DEST_DB}.${table}"
+  local src_count
+  local dest_count
+
+  if ! [[ "${table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    err "invalid TABLE: ${table}"
+    exit 1
+  fi
+
+  log "start export"
+  log "TABLE=${table}"
+  log "DT=${DT}"
+  log "SOURCE=${src_table}"
+  log "DEST=${dest_table}"
+
+  src_count="$(run_count "SELECT count(*) FROM ${src_table} WHERE dt = DATE '${DT}'")"
+  log "source count=${src_count}"
+
+  "${SPARK_SQL_BIN}" <<SQL
+DELETE FROM ${dest_table}
+WHERE dt = DATE '${DT}';
+
+INSERT INTO ${dest_table}
+SELECT *
+FROM ${src_table}
+WHERE dt = DATE '${DT}';
+SQL
+
+  dest_count="$(run_count "SELECT count(*) FROM ${dest_table} WHERE dt = DATE '${DT}'")"
+  log "dest count=${dest_count}"
+
+  if [ "${src_count}" != "${dest_count}" ]; then
+    err "count mismatch: source=${src_count}, dest=${dest_count}"
+    exit 1
+  fi
+
+  log "completed successfully"
+}
+
+main() {
+  local table
+
+  if ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    err "DT must be YYYY-MM-DD: ${DT}"
+    exit 1
+  fi
+
+  if [ -n "${TABLE}" ]; then
+    sync_table "${TABLE}"
+    return
+  fi
+
+  log "daily export start: DT=${DT}"
+  for table in "${TABLES[@]}"; do
+    sync_table "${table}"
+  done
+  log "daily export completed successfully: DT=${DT}"
+}
+
+main "$@"
+EOF
+
+sudo chmod 755 /usr/local/bin/export-iceberg-to-s3
+sudo chown root:root /usr/local/bin/export-iceberg-to-s3
 ```
 
-`readme2.md` の日次取り込みが完了した後に AWS 同期が動くよう、実行時刻を調整してください。
+### 4.2 対象日を手動同期する
+
+例として `2026-08-18` の `nginx_access_curated` だけを同期します。
+
+実行ユーザー: 通常ユーザー（処理本体は spark ユーザー）
+
+```bash
+sudo -u spark -H bash -lc '
+set -a
+source /etc/iceberg/aws.env
+set +a
+
+TABLE=nginx_access_curated \
+DT=2026-08-18 \
+SPARK_SQL_BIN=/usr/local/bin/spark-sql-iceberg-aws \
+/usr/local/bin/export-iceberg-to-s3
+'
+```
+
+3テーブルをまとめて同期する場合は `TABLE` を指定しません。`DT` を省略すると前日が対象です。
+
+```bash
+sudo -u spark -H bash -lc '
+set -a
+source /etc/iceberg/aws.env
+set +a
+
+DT=2026-08-18 \
+SPARK_SQL_BIN=/usr/local/bin/spark-sql-iceberg-aws \
+/usr/local/bin/export-iceberg-to-s3
+'
+```
+
+同じ日付で再実行できます。systemd から実行する場合は `ExecStart=/usr/local/bin/export-iceberg-to-s3` とし、`readme2.md` の日次取り込みが完了した後に動くよう timer の実行時刻を調整してください。
 
 ## 5. 同期結果を確認する
 
@@ -164,6 +301,8 @@ Spark から自宅側と AWS 側の件数を比較します。
 実行ユーザー: spark
 
 ```bash
+TARGET_DATE=2026-08-18
+
 /usr/local/bin/spark-sql-iceberg-aws <<EOF
 SELECT count(*) AS home_count
 FROM hive_prod.logs.nginx_access_curated
@@ -480,14 +619,14 @@ sudo chown spark:spark /opt/iceberg/bin/check_aws_iceberg.sh
 
 ```bash
 DT=2026-08-18 \
-/opt/iceberg/bin/check_aws_iceberg_daily.sh
+/opt/iceberg/bin/check_aws_iceberg.sh
 ```
 
 `DT` を省略した場合は前日を確認します。
 
 ### 8.6 週次 maintenance スクリプトを丸ごと入れ替える
 
-運用編の `/opt/iceberg/bin/maintain_aws_iceberg_weekly.sh` を、`nginx_access_curated` を含む次の内容で置き換えます。
+運用編の週次 maintenance シェルを、`nginx_access_curated` を含む次の内容で `/opt/iceberg/bin/maintain_aws_iceberg.sh` に作成し直します。
 
 実行ユーザー: 通常ユーザー
 
@@ -561,7 +700,7 @@ sudo chown spark:spark /opt/iceberg/bin/maintain_aws_iceberg.sh
 
 ```bash
 DT=2026-08-18 \
-/opt/iceberg/bin/maintain_aws_iceberg_weekly.sh
+/opt/iceberg/bin/maintain_aws_iceberg.sh
 ```
 
 成功後は、既存の `maintain-aws-iceberg.timer` が `nginx_access_curated` も処理します。ただし、運用編の timer は `DT` 未指定で全 table を `OPTIMIZE` します。データ量が増えた環境では、対象日を分割するよう maintenance スクリプトまたは unit を調整してから定期実行してください。
