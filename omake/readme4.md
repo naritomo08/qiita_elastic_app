@@ -15,11 +15,12 @@ glue_prod.logs.nginx_access_curated（Amazon S3、分析用コピー）
           QuickSight / Amazon Quick
 ```
 
-この手順では、次の3記事で S3、Glue Data Catalog、Athena、IAM、および Spark の AWS 用設定が構築済みであることを前提とします。
+この手順では、次の4記事で S3、Glue Data Catalog、Athena、IAM、および Spark の AWS 用設定が構築済みであることを前提とします。
 
 - [自宅HDFS上のApache IcebergをAmazon S3へ複製しAthenaから分析してみる【構築編】](https://qiita.com/naritomo08/items/d3db5aefc9a56cc2b2a6)
 - [AWS S3上のApache IcebergをAthena向けに運用する【運用編】](https://qiita.com/naritomo08/items/f84d266b7f2f3a53d6e0)
 - [AWS S3上のApache IcebergをAthena経由で可視化する【発展編】](https://qiita.com/naritomo08/items/48f6e29c32071a5a0b28)
+- [AWS S3上のApache Icebergコピーから自宅HDFS Icebergへリストアする【復旧編】](https://qiita.com/naritomo08/items/3d1c6d0dbb5001d73609)
 
 記事で作成した `syslog_iceberg`、`authlog_iceberg`、S3 bucket、Glue database、Athena workgroup はそのまま残します。この README で追加する対象は `nginx_access_curated` と、任意で作る同テーブル用の View / QuickSight リソースだけです。
 
@@ -797,11 +798,123 @@ warehouse/<GLUE_DATABASE>/nginx_access_curated/
 - S3 Versioning / lifecycle と Athena query result の保持状況を確認する
 - IAM Access Key、AWS利用料金、QuickSight / Quick の更新頻度を確認する
 
-## 9. 今回導入したデータだけを削除する
+## 9. AWS 側コピーから自宅 HDFS へリストアする
+
+復旧編の手順へ `nginx_access_curated` を追加すると、AWS 側の分析用コピーから自宅 HDFS の特定日データを戻せます。これは定常的な双方向同期ではなく、自宅側の対象日を破損・削除した場合の手動復旧だけに使用します。
+
+```text
+glue_prod.<GLUE_DATABASE>.nginx_access_curated（AWS 側コピー）
+                  ↓ Spark DELETE + INSERT
+hive_prod.logs.nginx_access_curated（自宅 HDFS、正本）
+```
+
+リストアは自宅側の同じ `dt` を削除してから書き直します。対象日を間違えると正本の正常なデータも置き換わるため、次の条件をすべて満たす場合だけ実行してください。
+
+- AWS 側に対象日の完全なコピーがあり、件数が `0` でない
+- 同じ `dt` の日次取り込み、AWS 向け同期、手動再実行が動いていない
+- AWS 側と自宅側でカラム名、型、順序、partition spec が一致している
+- `CONFIRM_RESTORE=1` と対象日を明示する
+- 実行後に総件数だけでなく、`host` や `container_name` 単位でも比較する
+
+### 9.1 復旧編の共通スクリプトを調整する
+
+復旧編で作成した `/opt/iceberg/bin/restore_iceberg_from_s3.sh` は `TABLE` を受け取るため、処理本体の追加は不要です。ただし、この README は Glue database を `GLUE_DATABASE` で変更できるため、同スクリプトの `SOURCE_DB` の既定値を次のように変更します。
+
+```bash
+# 変更前
+SOURCE_DB=${SOURCE_DB:-logs}
+
+# 変更後
+SOURCE_DB=${SOURCE_DB:-${GLUE_DATABASE:-logs}}
+```
+
+`GLUE_DATABASE=logs` の環境では実行結果は変わりません。別名の Glue database を使用している環境でも、AWS 側の正しいテーブルを参照できるようになります。
+
+復旧編の `/opt/iceberg/bin/restore_logs_from_s3.sh` で3テーブルを一括復旧する必要がある場合だけ、`TABLES` に1行追加します。
+
+```bash
+TABLES=(
+  syslog_iceberg
+  authlog_iceberg
+  nginx_access_curated
+)
+```
+
+一括実行は3テーブルの自宅側データを順番に書き換えます。`nginx_access_curated` だけを復旧する場合は親スクリプトを変更せず、次節の1テーブル実行を使用してください。
+
+### 9.2 schema とリストア元を確認する
+
+実行ユーザー: spark
+
+```bash
+source /etc/profile.d/iceberg-s3-athena.sh
+use_iceberg_aws_sync
+
+RESTORE_DT=2026-08-27
+
+/usr/local/bin/spark-sql-iceberg-aws <<EOF
+DESCRIBE TABLE glue_prod.${GLUE_DATABASE}.nginx_access_curated;
+DESCRIBE TABLE hive_prod.logs.nginx_access_curated;
+
+SHOW CREATE TABLE glue_prod.${GLUE_DATABASE}.nginx_access_curated;
+SHOW CREATE TABLE hive_prod.logs.nginx_access_curated;
+
+SELECT count(*) AS aws_count
+FROM glue_prod.${GLUE_DATABASE}.nginx_access_curated
+WHERE dt = DATE '${RESTORE_DT}';
+
+SELECT count(*) AS home_count_before_restore
+FROM hive_prod.logs.nginx_access_curated
+WHERE dt = DATE '${RESTORE_DT}';
+EOF
+```
+
+AWS 側の `aws_count` が `0` の場合は実行しません。両テーブルの列順や型が異なる場合も、共通スクリプトの `SELECT *` は使用せず、差異を解消するか列名と必要な変換を明示した専用 SQL を用意してください。
+
+### 9.3 `nginx_access_curated` だけをリストアする
+
+事前確認と同じシェルで、対象日をもう一度確認してから実行します。
+
+```bash
+TABLE=nginx_access_curated \
+  SOURCE_DB="${GLUE_DATABASE}" \
+  DEST_DB=logs \
+  DT=2026-08-27 \
+  CONFIRM_RESTORE=1 \
+  /opt/iceberg/bin/restore_iceberg_from_s3.sh
+```
+
+この操作は systemd timer や cron へ登録しません。同じ `DT` で再実行した場合も、先に自宅側を `DELETE` するため単純な重複追加にはなりませんが、実行のたびに自宅側 Iceberg の snapshot は増えます。
+
+### 9.4 リストア結果を確認する
+
+```bash
+RESTORE_DT=2026-08-27
+
+/usr/local/bin/spark-sql-iceberg-aws <<EOF
+SELECT 'aws' AS location, host, container_name, count(*) AS cnt
+FROM glue_prod.${GLUE_DATABASE}.nginx_access_curated
+WHERE dt = DATE '${RESTORE_DT}'
+GROUP BY host, container_name
+
+UNION ALL
+
+SELECT 'home' AS location, host, container_name, count(*) AS cnt
+FROM hive_prod.logs.nginx_access_curated
+WHERE dt = DATE '${RESTORE_DT}'
+GROUP BY host, container_name
+
+ORDER BY host, container_name, location;
+EOF
+```
+
+AWS 側と自宅側で、総件数および各 `host` / `container_name` の件数が一致することを確認します。`DELETE` 後に `INSERT` が失敗した場合は追加操作を止め、自宅側の `hive_prod.logs.nginx_access_curated.snapshots` を確認して、復旧編の snapshot からの復元方針に従ってください。
+
+## 10. 今回導入したデータだけを削除する
 
 自宅 HDFS の正本は削除しません。また、記事で作成済みの `syslog_iceberg`、`authlog_iceberg`、Glue database、S3 bucket、Athena workgroup、IAM user / policy も削除しません。
 
-### 9.1 指定日の AWS コピーだけを削除する
+### 10.1 指定日の AWS コピーだけを削除する
 
 日次同期に `nginx_access_curated` を追加済みの場合は、削除対象日が次回同期で再投入されないことを先に確認します。
 
@@ -833,7 +946,7 @@ WHERE dt = DATE '2026-06-21';
 
 Iceberg の整合性を壊すため、`data/dt=2026-06-21/` のような S3 prefix を `aws s3 rm` で直接削除してはいけません。
 
-### 9.2 この README で追加した AWS 側テーブルをすべて削除する
+### 10.2 この README で追加した AWS 側テーブルをすべて削除する
 
 `nginx_access_curated` を日次同期の `TABLES` に追加した場合は、先にその1行を削除します。systemd timer 自体は `syslog_iceberg` と `authlog_iceberg` の同期に使うため停止・削除しません。
 

@@ -634,4 +634,4 @@ docker compose exec backend_python python -c \
 | `omake/readme1.md` | frontend のアクセスログAPIから日次ログを取得し、Elasticsearch Data Stream `logs-access` へ投入する手順。ILM、インデックステンプレート、再実行可能な取り込みシェル、cron例を含みます。 |
 | `omake/readme2.md` | syslog 側に蓄積された nginx JSONログを Spark SQL で整形し、Iceberg テーブル `hive_prod.logs.nginx_access_curated` へ日次取り込みする手順。件数確認や複数フロントエンド向けの実行例も含みます。 |
 | `omake/readme3.md` | Iceberg の `nginx_access_curated` を正本として、Elasticsearch Data Stream `logs-access-iceberg` へ連携する手順。Kibana Data View 登録や ILM による保持期間管理の運用イメージをまとめています。 |
-| `omake/readme4.md` | 自宅 HDFS の Iceberg テーブル `nginx_access_curated` を AWS 側へ日付単位で複製し、Athena や QuickSight / Quick から参照する手順。snapshot、`OPTIMIZE`、`VACUUM`、日次・週次運用、および今回追加した AWS 側データだけを削除する手順も含みます。 |
+| `omake/readme4.md` | 自宅 HDFS の Iceberg テーブル `nginx_access_curated` を AWS 側へ日付単位で複製し、Athena や QuickSight / Quick から参照する手順。snapshot、`OPTIMIZE`、`VACUUM`、日次・週次運用、AWS 側コピーからの特定日リストア、および今回追加した AWS 側データだけを削除する手順も含みます。 |
