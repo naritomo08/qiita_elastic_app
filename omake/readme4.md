@@ -143,17 +143,18 @@ aws s3 ls \
 実行ユーザー: root
 
 ```bash
-sudo tee /usr/local/bin/export-iceberg-to-s3 > /dev/null <<'EOF'
+sudo tee /opt/iceberg/bin/check_aws_iceberg.sh > /dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_CATALOG=${SOURCE_CATALOG:-hive_prod}
-DEST_CATALOG=${DEST_CATALOG:-glue_prod}
-SOURCE_DB=${SOURCE_DB:-logs}
-DEST_DB=${DEST_DB:-${GLUE_DATABASE:-logs}}
-TABLE=${TABLE:-}
+AWS_REGION=${AWS_REGION:-ap-northeast-1}
+AWS_PROFILE=${AWS_PROFILE:-default}
+ICEBERG_BUCKET=${ICEBERG_BUCKET:?ICEBERG_BUCKET is required}
+ATHENA_RESULT_BUCKET=${ATHENA_RESULT_BUCKET:?ATHENA_RESULT_BUCKET is required}
+ATHENA_WORKGROUP=${ATHENA_WORKGROUP:-home-log-iceberg}
+GLUE_DATABASE=${GLUE_DATABASE:-logs}
 DT=${DT:-$(date -d yesterday +%F)}
-SPARK_SQL_BIN=${SPARK_SQL_BIN:-/usr/local/bin/spark-sql-iceberg-aws}
+RUN_ATHENA=${RUN_ATHENA:-/opt/iceberg/bin/run_athena_query_with_stats.sh}
 
 TABLES=(
   syslog_iceberg
@@ -165,131 +166,49 @@ log() {
   echo "[INFO] $(date '+%F %T') $*"
 }
 
-err() {
-  echo "[ERROR] $(date '+%F %T') $*" >&2
-}
-
-extract_last_integer() {
-  awk '
-    {
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
-      if ($0 ~ /^[0-9]+$/) val=$0
-    }
-    END {
-      if (val == "") exit 1
-      print val
-    }
-  '
-}
-
-run_count() {
+run_athena() {
   local sql="$1"
-  local out
 
-  out="$("${SPARK_SQL_BIN}" -S -e "${sql}")"
-  printf '%s\n' "${out}" | extract_last_integer
+  AWS_REGION="${AWS_REGION}" \
+  AWS_PROFILE="${AWS_PROFILE}" \
+  ATHENA_RESULT_BUCKET="${ATHENA_RESULT_BUCKET}" \
+  ATHENA_WORKGROUP="${ATHENA_WORKGROUP}" \
+  SQL="${sql}" \
+  "${RUN_ATHENA}"
 }
 
-sync_table() {
-  local table="$1"
-  local src_table="${SOURCE_CATALOG}.${SOURCE_DB}.${table}"
-  local dest_table="${DEST_CATALOG}.${DEST_DB}.${table}"
-  local src_count
-  local dest_count
+if ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  log "ERROR DT must be YYYY-MM-DD: ${DT}"
+  exit 1
+fi
 
-  if ! [[ "${table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-    err "invalid TABLE: ${table}"
-    exit 1
-  fi
+log "check AWS Iceberg daily: DT=${DT}"
 
-  log "start export"
-  log "TABLE=${table}"
-  log "DT=${DT}"
-  log "SOURCE=${src_table}"
-  log "DEST=${dest_table}"
+for table in "${TABLES[@]}"; do
+  log "S3 summarize: ${table}"
+  aws s3 ls \
+    "s3://${ICEBERG_BUCKET}/warehouse/${GLUE_DATABASE}/${table}/" \
+    --recursive \
+    --summarize \
+    --profile "${AWS_PROFILE}" \
+    | tail -5
 
-  src_count="$(run_count "SELECT count(*) FROM ${src_table} WHERE dt = DATE '${DT}'")"
-  log "source count=${src_count}"
+  log "Athena count: ${table}"
+  run_athena "SELECT count(*) FROM ${GLUE_DATABASE}.${table} WHERE dt = DATE '${DT}'"
+done
 
-  "${SPARK_SQL_BIN}" <<SQL
-DELETE FROM ${dest_table}
-WHERE dt = DATE '${DT}';
-
-INSERT INTO ${dest_table}
-SELECT *
-FROM ${src_table}
-WHERE dt = DATE '${DT}';
-SQL
-
-  dest_count="$(run_count "SELECT count(*) FROM ${dest_table} WHERE dt = DATE '${DT}'")"
-  log "dest count=${dest_count}"
-
-  if [ "${src_count}" != "${dest_count}" ]; then
-    err "count mismatch: source=${src_count}, dest=${dest_count}"
-    exit 1
-  fi
-
-  log "completed successfully"
-}
-
-main() {
-  local table
-
-  if ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    err "DT must be YYYY-MM-DD: ${DT}"
-    exit 1
-  fi
-
-  if [ -n "${TABLE}" ]; then
-    sync_table "${TABLE}"
-    return
-  fi
-
-  log "daily export start: DT=${DT}"
-  for table in "${TABLES[@]}"; do
-    sync_table "${table}"
-  done
-  log "daily export completed successfully: DT=${DT}"
-}
-
-main "$@"
+log "check completed successfully: DT=${DT}"
 EOF
 
-sudo chmod 755 /usr/local/bin/export-iceberg-to-s3
-sudo chown root:root /usr/local/bin/export-iceberg-to-s3
+sudo chmod 755 /opt/iceberg/bin/check_aws_iceberg.sh
 ```
 
 ### 4.2 対象日を手動同期する
 
-例として `2026-08-18` の `nginx_access_curated` だけを同期します。
-
-実行ユーザー: 通常ユーザー（処理本体は spark ユーザー）
-
-```bash
-sudo -u spark -H bash -lc '
-set -a
-source /etc/iceberg/aws.env
-set +a
-
-TABLE=nginx_access_curated \
-DT=2026-08-18 \
-SPARK_SQL_BIN=/usr/local/bin/spark-sql-iceberg-aws \
-/usr/local/bin/export-iceberg-to-s3
-'
-```
-
 3テーブルをまとめて同期する場合は `TABLE` を指定しません。`DT` を省略すると前日が対象です。
 
 ```bash
-sudo -u spark -H bash -lc '
-set -a
-source /etc/iceberg/aws.env
-set +a
-
-DT=2026-08-18 \
-SPARK_SQL_BIN=/usr/local/bin/spark-sql-iceberg-aws \
-/usr/local/bin/export-iceberg-to-s3
-'
+DT=2026-08-27 export-iceberg-to-s3
 ```
 
 同じ日付で再実行できます。systemd から実行する場合は `ExecStart=/usr/local/bin/export-iceberg-to-s3` とし、`readme2.md` の日次取り込みが完了した後に動くよう timer の実行時刻を調整してください。
@@ -301,7 +220,7 @@ Spark から自宅側と AWS 側の件数を比較します。
 実行ユーザー: spark
 
 ```bash
-TARGET_DATE=2026-08-18
+TARGET_DATE=2026-08-27
 
 /usr/local/bin/spark-sql-iceberg-aws <<EOF
 SELECT count(*) AS home_count
