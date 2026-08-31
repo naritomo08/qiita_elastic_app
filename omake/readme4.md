@@ -650,6 +650,7 @@ ATHENA_RESULT_BUCKET=${ATHENA_RESULT_BUCKET:?ATHENA_RESULT_BUCKET is required}
 ATHENA_WORKGROUP=${ATHENA_WORKGROUP:-home-log-iceberg}
 GLUE_DATABASE=${GLUE_DATABASE:-logs}
 DT=${DT:-}
+DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-14}
 RUN_ATHENA=${RUN_ATHENA:-/opt/iceberg/bin/run_athena_query_with_stats.sh}
 
 TABLES=(
@@ -678,11 +679,19 @@ if [ -n "${DT}" ] && ! [[ "${DT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
   exit 1
 fi
 
-log "weekly maintenance start: DT=${DT:-all}"
+if ! [[ "${DATA_RETENTION_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+  log "ERROR DATA_RETENTION_DAYS must be a positive integer: ${DATA_RETENTION_DAYS}"
+  exit 1
+fi
+
+log "maintenance start: DT=${DT:-all}, DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS}"
 
 for table in "${TABLES[@]}"; do
   log "set vacuum properties: ${table}"
   run_athena "ALTER TABLE ${GLUE_DATABASE}.${table} SET TBLPROPERTIES ('vacuum_min_snapshots_to_keep'='3','vacuum_max_snapshot_age_seconds'='604800','vacuum_max_metadata_files_to_keep'='30')"
+
+  log "delete old data: ${table}, retention=${DATA_RETENTION_DAYS} days"
+  run_athena "DELETE FROM ${GLUE_DATABASE}.${table} WHERE dt < date_add('day', -${DATA_RETENTION_DAYS}, current_date)"
 
   if [ -n "${DT}" ]; then
     log "optimize ${table}: DT=${DT}"
@@ -700,7 +709,6 @@ log "maintenance completed successfully"
 EOF
 
 sudo chmod 755 /opt/iceberg/bin/maintain_aws_iceberg.sh
-sudo chown spark:spark /opt/iceberg/bin/maintain_aws_iceberg.sh
 ```
 
 まず `DT` を指定して手動実行します。
