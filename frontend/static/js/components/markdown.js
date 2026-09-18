@@ -288,12 +288,20 @@ export async function renderLinkPreviews() {
 
 export async function convertExistingQiitaArticleLinks() {
   const links = [...document.querySelectorAll(".markdown-body a[href]")];
-  await Promise.all(links.map(async (link) => {
-    const articleId = qiitaArticleId(link.href);
-    const article = articleId ? await localArticle(articleId) : null;
-    if (!article) return;
+  const references = links.map((link) => [link, qiitaArticleReference(link.href)]);
+  references.forEach(([, reference]) => {
+    if (reference?.pathType === "private") qiitaArticleLinkCache.delete(reference.articleId);
+  });
 
-    link.href = `/articles/${encodeURIComponent(articleId)}`;
+  await Promise.all(references.map(async ([link, reference]) => {
+    const article = reference ? await localArticle(reference.articleId) : null;
+    if (!article) return;
+    if (
+      reference.pathType === "private" &&
+      qiitaArticleReference(article.url)?.pathType !== "items"
+    ) return;
+
+    link.href = `/articles/${encodeURIComponent(reference.articleId)}`;
     link.dataset.localArticlePreview = "true";
     link.dataset.previewTitle = article.title || "無題の記事";
     link.dataset.previewSite = "本サイト内の記事";
@@ -313,22 +321,22 @@ export function secureArticleLinks() {
   });
 }
 
-function qiitaArticleId(value) {
+function qiitaArticleReference(value) {
   let url;
   try {
     url = new URL(value);
   } catch {
-    return "";
+    return null;
   }
 
-  if (!["qiita.com", "www.qiita.com"].includes(url.hostname.toLowerCase())) return "";
+  if (!["qiita.com", "www.qiita.com"].includes(url.hostname.toLowerCase())) return null;
   const parts = url.pathname.split("/").filter(Boolean);
-  if (parts.length < 3 || parts[1] !== "items") return "";
+  if (parts.length < 3 || !["items", "private"].includes(parts[1])) return null;
 
   try {
-    return decodeURIComponent(parts[2]);
+    return { articleId: decodeURIComponent(parts[2]), pathType: parts[1] };
   } catch {
-    return parts[2];
+    return { articleId: parts[2], pathType: parts[1] };
   }
 }
 
