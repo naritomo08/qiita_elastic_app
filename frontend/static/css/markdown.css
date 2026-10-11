@@ -407,7 +407,7 @@
   max-width: 100%;
   margin: 1.8em 0;
   padding: 22px;
-  overflow-x: auto;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: #fff;
@@ -418,7 +418,7 @@
 .mermaid-diagram svg {
   display: block;
   width: auto !important;
-  max-width: none !important;
+  max-width: 100% !important;
   height: auto;
   margin: 0 auto;
 }

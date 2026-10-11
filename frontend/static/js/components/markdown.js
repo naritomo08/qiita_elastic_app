@@ -11,7 +11,7 @@ async function loadMermaid() {
         securityLevel: "strict",
         theme: "neutral",
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
-        flowchart: { htmlLabels: false, useMaxWidth: false },
+        flowchart: { htmlLabels: false, useMaxWidth: true },
       });
       return mermaid;
     });
