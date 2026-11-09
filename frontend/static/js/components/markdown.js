@@ -11,7 +11,7 @@ async function loadMermaid() {
         securityLevel: "strict",
         theme: "neutral",
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif',
-        flowchart: { htmlLabels: false, useMaxWidth: true },
+        flowchart: { htmlLabels: false, useMaxWidth: false },
       });
       return mermaid;
     });
@@ -32,10 +32,21 @@ export async function renderMermaid() {
     code.parentElement.replaceWith(diagram);
     try {
       await mermaid.run({ nodes: [diagram] });
+      preserveMermaidNaturalSize(diagram);
     } catch {
       diagram.outerHTML = `<p class="mermaid-error-message">Mermaid図を描画できないため、定義を表示しています。</p><pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
     }
   }
+}
+
+function preserveMermaidNaturalSize(diagram) {
+  const svg = diagram.querySelector(":scope > svg");
+  const viewBox = svg?.viewBox?.baseVal;
+  if (!svg || !viewBox?.width) return;
+
+  // Mermaidのwidth="100%"をそのまま使うと、縦1列の小さな図まで本文幅へ
+  // 拡大される。図の自然幅を上限にし、狭い画面ではCSS側で縮小する。
+  svg.style.setProperty("--mermaid-natural-width", `${Math.ceil(viewBox.width)}px`);
 }
 
 export function renderArticleTree() {
@@ -80,9 +91,18 @@ export function enhanceCodeBlocks() {
     const code = pre.querySelector(":scope > code");
     if (!code) return;
 
+    const filename = qiitaCodeFilename(code);
+
     const wrapper = document.createElement("div");
     wrapper.className = "code-block";
     pre.before(wrapper);
+    if (filename) {
+      const label = document.createElement("div");
+      label.className = "code-block-filename";
+      label.textContent = filename;
+      wrapper.append(label);
+      wrapper.classList.add("has-filename");
+    }
     wrapper.append(pre);
 
     const button = document.createElement("button");
@@ -126,6 +146,22 @@ export function enhanceCodeBlocks() {
       }, 1800);
     });
   });
+}
+
+function qiitaCodeFilename(code) {
+  const languageClass = [...code.classList].find((name) => name.startsWith("language-"));
+  const language = languageClass?.slice("language-".length) || "";
+  const separator = language.indexOf(":");
+  if (separator < 0) return "";
+
+  const filename = language.slice(separator + 1).trim();
+  if (!filename) return "";
+
+  // `language-ruby:sample.rb` のうち、ハイライト対象の言語名だけを残す。
+  code.classList.remove(languageClass);
+  const syntax = language.slice(0, separator).trim();
+  if (syntax) code.classList.add(`language-${syntax}`);
+  return filename;
 }
 
 function uniqueHeadingId(value, usedIds) {
